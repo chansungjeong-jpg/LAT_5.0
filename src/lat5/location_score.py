@@ -22,6 +22,8 @@ class LocationInputs:
     supply_distance_pct: float | None
     rr: float | None
     golden_cross_ok: bool | None = False
+    daily_ma_reaction_score: int | None = None
+    daily_ma_reaction_state: str | None = None
 
 
 @dataclass(frozen=True)
@@ -54,7 +56,7 @@ def _volume_score(ratio: float) -> int:
 
 def _m60_location_score(price: float, ema60: float, ema120: float) -> int:
     if price >= ema60 >= ema120:
-        return 25
+        return 20
     if price >= ema60:
         return 15
     if price >= ema120:
@@ -68,6 +70,12 @@ def _slope_score(slope_pct: float) -> int:
     if slope_pct < 0.005:
         return 5
     return 10
+
+
+def _daily_ma_reaction_component(score: int | None, state: str | None) -> int:
+    if score is None or state in {None, "UNKNOWN"} or not _known(score):
+        return 0
+    return min(20, max(0, int(score)))
 
 
 def score_location(inputs: LocationInputs) -> LocationDecision:
@@ -113,14 +121,16 @@ def score_location(inputs: LocationInputs) -> LocationDecision:
         "m60_location": _m60_location_score(
             float(inputs.price), float(inputs.ema60), float(inputs.ema120)
         ),
-        "weekly_trend": 15 if inputs.weekly_trend_ok else 0,
-        "daily_trend": 15 if inputs.daily_trend_ok else 0,
+        "daily_ma_reaction": _daily_ma_reaction_component(
+            inputs.daily_ma_reaction_score, inputs.daily_ma_reaction_state
+        ),
+        "weekly_trend": 10 if inputs.weekly_trend_ok else 0,
+        "daily_trend": 5 if inputs.daily_trend_ok else 0,
         "slope": _slope_score(float(inputs.m60_slope_pct)),
         "recent_5d_bullish": (
             5 if int(inputs.recent_5d_bullish_count) >= 4
             else 3 if int(inputs.recent_5d_bullish_count) >= 2 else 0
         ),
-        "golden_cross": 3 if inputs.golden_cross_ok else 0,
     }
     score = sum(components.values())
 

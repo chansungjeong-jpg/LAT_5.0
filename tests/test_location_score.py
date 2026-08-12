@@ -18,6 +18,8 @@ def _strong_inputs(**overrides):
         daily_distance_pct=0.05,
         supply_distance_pct=0.08,
         rr=2.0,
+        daily_ma_reaction_score=20,
+        daily_ma_reaction_state="SMA60_UPWARD_CROSS_STRONG_BULL",
     )
     values.update(overrides)
     return LocationInputs(**values)
@@ -29,6 +31,9 @@ def test_location_score_gives_volume_the_largest_weight_and_can_buy():
     assert result.state == "BUY"
     assert result.score == 100
     assert result.components["volume"] == 30
+    assert result.components["m60_location"] == 20
+    assert result.components["weekly_trend"] == 10
+    assert result.components["daily_trend"] == 5
 
 
 def test_location_score_blocks_buy_when_distance_is_overheated():
@@ -51,9 +56,56 @@ def test_location_score_rejects_missing_required_inputs():
     assert "volume_ratio" in result.unknown_fields
 
 
-def test_golden_cross_is_only_a_small_confirmation_bonus():
-    without = score_location(_strong_inputs(daily_trend_ok=False, golden_cross_ok=False))
-    with_cross = score_location(_strong_inputs(daily_trend_ok=False, golden_cross_ok=True))
+def test_daily_ma_reaction_is_a_twenty_point_component():
+    result = score_location(_strong_inputs(daily_ma_reaction_score=20))
 
-    assert with_cross.score == without.score + 3
-    assert with_cross.components["golden_cross"] == 3
+    assert result.components["daily_ma_reaction"] == 20
+
+
+def test_daily_ma_reaction_does_not_exceed_total_component_cap():
+    result = score_location(_strong_inputs(daily_ma_reaction_score=99))
+
+    assert result.components["daily_ma_reaction"] == 20
+
+
+def test_daily_ma_reaction_unknown_is_zero_without_rejecting_location_decision():
+    result = score_location(
+        _strong_inputs(daily_ma_reaction_score=20, daily_ma_reaction_state="UNKNOWN")
+    )
+
+    assert result.state == "BUY"
+    assert result.components["daily_ma_reaction"] == 0
+
+
+def test_daily_ma_reaction_none_is_zero_without_rejecting_location_decision():
+    result = score_location(
+        _strong_inputs(
+            daily_ma_reaction_score=None,
+            daily_ma_reaction_state="SMA60_UPWARD_CROSS_STRONG_BULL",
+        )
+    )
+
+    assert result.state == "BUY"
+    assert result.components["daily_ma_reaction"] == 0
+
+
+def test_sma5_break_can_make_watch_but_is_not_hard_reject_by_itself():
+    result = score_location(
+        _strong_inputs(
+            volume_ratio=1.3,
+            daily_ma_reaction_score=-4,
+            daily_ma_reaction_state="SMA5_CLOSE_BREAK",
+        )
+    )
+
+    assert result.state == "WATCH"
+    assert result.components["daily_ma_reaction"] == 0
+    assert "DAILY_MA_HARD_BLOCK" not in result.vetoes
+
+
+def test_golden_cross_is_not_a_standalone_location_bonus():
+    without = score_location(_strong_inputs(golden_cross_ok=False))
+    with_cross = score_location(_strong_inputs(golden_cross_ok=True))
+
+    assert with_cross.score == without.score
+    assert "golden_cross" not in with_cross.components
