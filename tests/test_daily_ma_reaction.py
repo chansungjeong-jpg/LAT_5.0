@@ -41,6 +41,7 @@ def test_sixty_sma_upward_cross_with_strong_bullish_bar_scores_ten():
 
     assert result.reaction == "SMA60_UPWARD_CROSS_STRONG_BULL"
     assert result.base_score == 10
+    assert result.five_day_state == "SMA5_HOLD"
 
 
 def test_sma60_cross_accepts_previous_close_equal_to_previous_sma60():
@@ -62,8 +63,8 @@ def test_sma60_current_close_equal_to_sma60_is_not_an_upward_cross():
 
     result = score_daily_reaction(frame, as_of=last + pd.Timedelta(days=1))
 
-    assert result.reaction == "NONE"
-    assert result.base_score == 0
+    assert result.reaction == "SMA5_HOLD"
+    assert result.reaction != "SMA60_UPWARD_CROSS_STRONG_BULL"
 
 
 @pytest.mark.parametrize(
@@ -139,8 +140,23 @@ def test_sma20_pullback_rejects_low_just_outside_quarter_atr_distance():
 
     result = score_daily_reaction(frame, as_of=as_of)
 
-    assert result.reaction == "NONE"
-    assert result.base_score == 0
+    assert result.reaction == "SMA5_HOLD"
+    assert result.reaction != "SMA20_PULLBACK_RECOVERY"
+
+
+def test_sma20_close_break_is_the_representative_hard_break():
+    frame = frame_with_bars(61)
+    frame.loc[:, "close"] = 100.0
+    frame.loc[:, "open"] = 99.0
+    frame.loc[:, "high"] = 101.0
+    frame.loc[:, "low"] = 98.0
+    last = frame.index[-1]
+    frame.loc[last, ["open", "high", "low", "close"]] = [100.0, 101.0, 89.0, 90.0]
+
+    result = score_daily_reaction(frame, as_of=last + pd.Timedelta(days=1))
+
+    assert result.reaction == "SMA20_CLOSE_BREAK"
+    assert result.base_score == -8
 
 
 def five_recovery_fixture() -> tuple[pd.DataFrame, pd.Timestamp]:
@@ -186,7 +202,7 @@ def test_sma5_recovery_accepts_current_close_equal_to_sma5():
 def five_break_fixture() -> tuple[pd.DataFrame, pd.Timestamp]:
     frame = frame_with_bars(70)
     last = frame.index[-1]
-    frame.loc[last, ["open", "high", "low", "close"]] = [160.0, 161.0, 154.0, 155.0]
+    frame.loc[last, ["open", "high", "low", "close"]] = [162.0, 163.0, 159.0, 160.0]
     return frame, last + pd.Timedelta(days=1)
 
 
@@ -200,13 +216,11 @@ def test_five_sma_close_break_is_deduction_not_unknown_or_hard_reject():
 
 
 def five_break_equal_fixture() -> tuple[pd.DataFrame, pd.Timestamp]:
-    frame = frame_with_bars(61)
-    frame.loc[:, "close"] = 100.0
-    frame.loc[:, "open"] = 99.0
-    frame.loc[:, "high"] = 101.0
-    frame.loc[:, "low"] = 98.0
+    frame = frame_with_bars(70)
+    previous = frame.index[-2]
     last = frame.index[-1]
-    frame.loc[last, ["open", "high", "low", "close"]] = [100.0, 101.0, 98.0, 99.0]
+    frame.loc[previous, "close"] = 165.5
+    frame.loc[last, ["open", "high", "low", "close"]] = [162.0, 163.0, 159.0, 160.0]
     return frame, last + pd.Timedelta(days=1)
 
 
@@ -220,11 +234,16 @@ def test_sma5_break_accepts_previous_close_equal_to_previous_sma5():
 
 
 @pytest.mark.parametrize(
-    ("previous_close", "current_close"),
-    [(100.5, 101.0), (99.0, 99.0)],
+    ("previous_close", "current_close", "expected_reaction", "expected_score"),
+    [(100.5, 101.0, "SMA5_HOLD", 3), (99.0, 99.0, "NONE", 0)],
     ids=("above_sma5", "below_sma5"),
 )
-def test_sma5_same_side_maintain_returns_none(previous_close: float, current_close: float):
+def test_sma5_same_side_reports_actual_hold_state(
+    previous_close: float,
+    current_close: float,
+    expected_reaction: str,
+    expected_score: int,
+):
     frame = frame_with_bars(61)
     frame.loc[:, "close"] = 100.0
     frame.loc[:, "open"] = 99.0
@@ -237,8 +256,8 @@ def test_sma5_same_side_maintain_returns_none(previous_close: float, current_clo
 
     result = score_daily_reaction(frame, as_of=last + pd.Timedelta(days=1))
 
-    assert result.reaction == "NONE"
-    assert result.base_score == 0
+    assert result.reaction == expected_reaction
+    assert result.base_score == expected_score
 
 
 def overlapping_fixture() -> tuple[pd.DataFrame, pd.Timestamp]:
@@ -270,8 +289,8 @@ def test_intraday_low_below_sma5_without_close_break_is_not_a_break():
 
     result = score_daily_reaction(frame, as_of=last + pd.Timedelta(days=1))
 
-    assert result.reaction == "NONE"
-    assert result.base_score == 0
+    assert result.reaction == "SMA5_HOLD"
+    assert "CLOSE_BREAK" not in result.reaction
 
 
 def test_daily_ma_reaction_inputs_are_public_contract_dataclass():
@@ -425,6 +444,25 @@ def test_close_near_high_adds_two_points():
 
     assert "CLOSE_NEAR_HIGH" in result.quality_reasons
     assert result.quality_components["close_near_high"] == 2
+
+
+def test_none_reaction_never_receives_candle_quality_bonus():
+    frame = frame_with_bars(61)
+    frame.loc[:, "close"] = 100.0
+    frame.loc[:, "open"] = 99.0
+    frame.loc[:, "high"] = 101.0
+    frame.loc[:, "low"] = 98.0
+    previous = frame.index[-2]
+    last = frame.index[-1]
+    frame.loc[previous, "close"] = 99.0
+    frame.loc[last, ["open", "high", "low", "close"]] = [90.0, 99.1, 89.0, 99.0]
+
+    result = score_daily_reaction(frame, as_of=last + pd.Timedelta(days=1))
+
+    assert result.reaction == "NONE"
+    assert result.quality_bonus == 0
+    assert result.quality_reasons == ()
+    assert result.total_score == 0
 
 
 @pytest.mark.parametrize(

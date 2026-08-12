@@ -32,6 +32,7 @@ class DailyMAReaction:
     quality_components: dict[str, int]
     quality_reasons: tuple[str, ...]
     quality_method: str | None
+    five_day_state: str
 
 
 def _sma(close: pd.Series, window: int) -> float | None:
@@ -79,6 +80,7 @@ def _unknown_result(
         quality_components={},
         quality_reasons=(),
         quality_method=None,
+        five_day_state="UNKNOWN",
     )
 
 
@@ -89,7 +91,20 @@ def _quality_bonus(
     sma5_series: pd.Series,
     sma20_series: pd.Series,
     sma60_series: pd.Series,
-) -> tuple[int, dict[str, int], tuple[str, ...], str]:
+) -> tuple[int, dict[str, int], tuple[str, ...], str | None]:
+    if reaction == "NONE":
+        return (
+            0,
+            {
+                "strong_body": 0,
+                "close_near_high": 0,
+                "reaction_slope_up": 0,
+                "golden_cross": 0,
+            },
+            (),
+            None,
+        )
+
     strong_body = _strong_body(validated)
     current_high = float(validated["high"].iloc[-1])
     current_low = float(validated["low"].iloc[-1])
@@ -101,7 +116,9 @@ def _quality_bonus(
     reaction_series = {
         "SMA60_UPWARD_CROSS_STRONG_BULL": sma60_series,
         "SMA20_PULLBACK_RECOVERY": sma20_series,
+        "SMA20_CLOSE_BREAK": sma20_series,
         "SMA5_RECOVERY": sma5_series,
+        "SMA5_HOLD": sma5_series,
         "SMA5_CLOSE_BREAK": sma5_series,
     }.get(reaction)
     reaction_slope_up = (
@@ -252,7 +269,15 @@ def score_daily_ma_reaction(
     previous_sma60 = float(sma60_series.iloc[-2])
     current_sma60 = float(sma60_series.iloc[-1])
     current_sma20 = float(sma20)
+    previous_sma5 = float(sma5_series.iloc[-2])
+    current_sma5 = float(sma5_series.iloc[-1])
     current_open = float(validated["open"].iloc[-1])
+    if current_close >= current_sma5:
+        five_day_state = (
+            "SMA5_RECOVERY" if previous_close < previous_sma5 else "SMA5_HOLD"
+        )
+    else:
+        five_day_state = "SMA5_CLOSE_BREAK"
     strong_body = _strong_body(validated)
     if (
         previous_close <= previous_sma60
@@ -275,11 +300,16 @@ def score_daily_ma_reaction(
             reaction = "SMA20_PULLBACK_RECOVERY"
             base_score = 8
         else:
-            previous_sma5 = float(sma5_series.iloc[-2])
-            current_sma5 = float(sma5_series.iloc[-1])
-            if previous_close < previous_sma5 and current_close >= current_sma5:
+            previous_sma20 = float(sma20_series.iloc[-2])
+            if previous_close >= previous_sma20 and current_close < current_sma20:
+                reaction = "SMA20_CLOSE_BREAK"
+                base_score = -8
+            elif previous_close < previous_sma5 and current_close >= current_sma5:
                 reaction = "SMA5_RECOVERY"
                 base_score = 6
+            elif current_close >= current_sma5:
+                reaction = "SMA5_HOLD"
+                base_score = 3
             elif previous_close >= previous_sma5 and current_close < current_sma5:
                 reaction = "SMA5_CLOSE_BREAK"
                 base_score = -4
@@ -309,6 +339,7 @@ def score_daily_ma_reaction(
         quality_components=quality_components,
         quality_reasons=quality_reasons,
         quality_method=quality_method,
+        five_day_state=five_day_state,
     )
 
 
