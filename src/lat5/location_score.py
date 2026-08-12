@@ -111,9 +111,9 @@ def evaluate_daily_ma_reaction_gate(
             unknown_fields=fields,
         )
     if state == "SMA20_CLOSE_BREAK":
-        return DailyMAReactionGate(-8, ("DAILY_MA_HARD_BLOCK",), ())
+        return DailyMAReactionGate(int(score), ("DAILY_MA_HARD_BLOCK",), ())
     if state == "SMA5_CLOSE_BREAK":
-        return DailyMAReactionGate(-4, ("DAILY_MA_WATCH_PRESSURE",), ())
+        return DailyMAReactionGate(int(score), ("DAILY_MA_WATCH_PRESSURE",), ())
     if state == "NONE":
         return DailyMAReactionGate(0, (), ())
     return DailyMAReactionGate(min(20, max(0, int(score))), (), ())

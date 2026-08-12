@@ -151,12 +151,15 @@ def test_sma20_close_break_is_the_representative_hard_break():
     frame.loc[:, "high"] = 101.0
     frame.loc[:, "low"] = 98.0
     last = frame.index[-1]
-    frame.loc[last, ["open", "high", "low", "close"]] = [100.0, 101.0, 89.0, 90.0]
+    frame.loc[last, ["open", "high", "low", "close"]] = [98.5, 99.2, 98.0, 99.0]
 
     result = score_daily_reaction(frame, as_of=last + pd.Timedelta(days=1))
 
     assert result.reaction == "SMA20_CLOSE_BREAK"
     assert result.base_score == -8
+    assert result.quality_bonus == 0
+    assert result.quality_reasons == ()
+    assert result.total_score == -8
 
 
 def five_recovery_fixture() -> tuple[pd.DataFrame, pd.Timestamp]:
@@ -202,7 +205,7 @@ def test_sma5_recovery_accepts_current_close_equal_to_sma5():
 def five_break_fixture() -> tuple[pd.DataFrame, pd.Timestamp]:
     frame = frame_with_bars(70)
     last = frame.index[-1]
-    frame.loc[last, ["open", "high", "low", "close"]] = [162.0, 163.0, 159.0, 160.0]
+    frame.loc[last, ["open", "high", "low", "close"]] = [164.5, 165.2, 164.0, 165.0]
     return frame, last + pd.Timedelta(days=1)
 
 
@@ -213,6 +216,9 @@ def test_five_sma_close_break_is_deduction_not_unknown_or_hard_reject():
 
     assert result.reaction == "SMA5_CLOSE_BREAK"
     assert result.base_score == -4
+    assert result.quality_bonus == 0
+    assert result.quality_reasons == ()
+    assert result.total_score == -4
 
 
 def five_break_equal_fixture() -> tuple[pd.DataFrame, pd.Timestamp]:

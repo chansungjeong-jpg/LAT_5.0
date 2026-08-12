@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import pandas as pd
 import pytest
 
-from lat5.location_decision import LocationScoreConfig, evaluate_watchlist_position
+from lat5.location_decision import (
+    LocationScoreConfig,
+    build_context,
+    evaluate_watchlist_position,
+)
 
 
 def _full_pass_ctx() -> dict:
@@ -32,6 +37,85 @@ def _full_pass_ctx() -> dict:
             "unknown_fields": [],
         },
     }
+
+
+def _daily_frame(count: int = 70) -> pd.DataFrame:
+    index = pd.date_range("2026-06-04", periods=count, freq="D")
+    close = pd.Series(range(100, 100 + count), index=index, dtype=float)
+    return pd.DataFrame(
+        {
+            "open": close - 1.0,
+            "high": close + 1.0,
+            "low": close - 2.0,
+            "close": close,
+            "volume": 1_000.0,
+        },
+        index=index,
+    )
+
+
+def _daily_reaction_case(case: str) -> tuple[pd.DataFrame, pd.Timestamp]:
+    if case == "sma5_break":
+        frame = _daily_frame()
+        last = frame.index[-1]
+        frame.loc[last, ["open", "high", "low", "close"]] = [
+            164.5,
+            165.2,
+            164.0,
+            165.0,
+        ]
+    elif case == "sma20_break":
+        frame = _daily_frame(61)
+        frame.loc[:, "close"] = 100.0
+        frame.loc[:, "open"] = 99.0
+        frame.loc[:, "high"] = 101.0
+        frame.loc[:, "low"] = 98.0
+        last = frame.index[-1]
+        frame.loc[last, ["open", "high", "low", "close"]] = [
+            98.5,
+            99.2,
+            98.0,
+            99.0,
+        ]
+    elif case == "recovery":
+        frame = _daily_frame()
+        previous = frame.index[-2]
+        last = frame.index[-1]
+        frame.loc[previous, "close"] = 155.0
+        frame.loc[last, ["open", "high", "low", "close"]] = [
+            165.0,
+            171.0,
+            169.0,
+            170.0,
+        ]
+    elif case == "unknown":
+        frame = _daily_frame(10)
+        last = frame.index[-1]
+    else:
+        raise AssertionError(f"unsupported case: {case}")
+    return frame, last + pd.Timedelta(days=1)
+
+
+def _full_pass_ctx_with_detected_reaction(case: str) -> dict:
+    daily, as_of = _daily_reaction_case(case)
+    detected = build_context(
+        daily=daily,
+        daily_ema=pd.DataFrame(),
+        hourly=pd.DataFrame(),
+        minutes=pd.DataFrame(),
+        as_of=as_of,
+        cfg=LocationScoreConfig(),
+    )
+    ctx = _full_pass_ctx()
+    ctx.update(
+        {
+            "daily_ma_reaction_score": detected["daily_ma_reaction_score"],
+            "daily_ma_reaction_state": detected["daily_ma_reaction_state"],
+            "daily_ma_reaction_reasons": detected["daily_ma_reaction_reasons"],
+            "daily_ma_reaction": detected["daily_ma_reaction"],
+        }
+    )
+    return ctx
 
 
 def test_not_on_watchlist_forces_ignore():
@@ -356,3 +440,28 @@ def test_unknown_daily_reaction_vetoes_buy_ready_and_exposes_unknown_fields():
     assert "DAILY_MA_REACTION_UNKNOWN" in result["vetoes"]
     assert "daily_ma_reaction.SMA60" in result["unknown_fields"]
     assert "daily_ma_reaction.ATR14" in result["unknown_fields"]
+
+
+@pytest.mark.parametrize(
+    ("case", "expected_reaction", "expected_component", "expected_state"),
+    [
+        ("sma5_break", "SMA5_CLOSE_BREAK", -4, "WATCH"),
+        ("sma20_break", "SMA20_CLOSE_BREAK", -8, "IGNORE"),
+        ("recovery", "SMA5_RECOVERY", 12, "BUY_READY"),
+        ("unknown", "UNKNOWN", 0, "IGNORE"),
+    ],
+)
+def test_evaluator_component_matches_detected_reaction_payload_score(
+    case: str,
+    expected_reaction: str,
+    expected_component: int,
+    expected_state: str,
+):
+    ctx = _full_pass_ctx_with_detected_reaction(case)
+
+    result = evaluate_watchlist_position(ctx, LocationScoreConfig())
+
+    assert result["daily_ma_reaction"]["reaction"] == expected_reaction
+    assert result["daily_ma_reaction"]["score"] == expected_component
+    assert result["score_components"]["daily_ma_reaction"] == expected_component
+    assert result["state"] == expected_state

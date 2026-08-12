@@ -92,7 +92,7 @@ def _quality_bonus(
     sma20_series: pd.Series,
     sma60_series: pd.Series,
 ) -> tuple[int, dict[str, int], tuple[str, ...], str | None]:
-    if reaction == "NONE":
+    if reaction in {"NONE", "SMA5_CLOSE_BREAK", "SMA20_CLOSE_BREAK"}:
         return (
             0,
             {

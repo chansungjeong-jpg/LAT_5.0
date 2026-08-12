@@ -120,6 +120,26 @@ def test_sma20_close_break_is_a_daily_ma_hard_block():
     assert "DAILY_MA_HARD_BLOCK" in result.vetoes
 
 
+def test_break_gates_use_the_provided_ssot_score_without_recalculating_penalties():
+    sma5 = score_location(
+        _strong_inputs(
+            daily_ma_reaction_score=-3,
+            daily_ma_reaction_state="SMA5_CLOSE_BREAK",
+        )
+    )
+    sma20 = score_location(
+        _strong_inputs(
+            daily_ma_reaction_score=-7,
+            daily_ma_reaction_state="SMA20_CLOSE_BREAK",
+        )
+    )
+
+    assert sma5.components["daily_ma_reaction"] == -3
+    assert "DAILY_MA_WATCH_PRESSURE" in sma5.vetoes
+    assert sma20.components["daily_ma_reaction"] == -7
+    assert "DAILY_MA_HARD_BLOCK" in sma20.vetoes
+
+
 def test_golden_cross_is_not_a_standalone_location_bonus():
     without = score_location(_strong_inputs(golden_cross_ok=False))
     with_cross = score_location(_strong_inputs(golden_cross_ok=True))
