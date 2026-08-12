@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lat5"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = ["pandas>=2.3", "python-dotenv>=1.1", "requests>=2.32"]
+
+[project.scripts]
+lat5 = "lat5.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

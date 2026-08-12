@@ -1,0 +1,17 @@
+.env
+data/kiwoom_token_cache.json
+data/kiwoom_token_cache.json.tmp
+
+# Local/generated market data and backtest outputs
+data/*.db
+data/*.sqlite*
+artifacts*/
+reports/*.db
+reports/*.csv
+reports/**/*.db
+reports/**/*.csv
+
+# Python/test caches
+__pycache__/
+*.py[cod]
+.pytest_cache/

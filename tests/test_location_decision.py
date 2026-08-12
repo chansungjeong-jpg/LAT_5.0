@@ -1,0 +1,221 @@
+from __future__ import annotations
+
+import pytest
+
+from lat5.location_decision import LocationScoreConfig, evaluate_watchlist_position
+
+
+def _full_pass_ctx() -> dict:
+    return {
+        "watchlist_ok": True,
+        "sector_score": 75,
+        "daily_trend_ok": True,
+        "m60_trend_ok": True,
+        "daily_bull_count_5": 5,
+        "daily_bull_count_10": 10,
+        "anchor_volume_ok": True,
+        "pullback_volume_dry": True,
+        "breakout_volume_ok": True,
+        "bullish_candle_strength_ok": True,
+        "pullback_state": "near_ema20",
+        "m5_ema20_distance_pct": 0.01,
+        "daily_ema10_distance_pct": 0.05,
+        "rr": 2.5,
+        "overhead_supply_close": False,
+    }
+
+
+def test_not_on_watchlist_forces_ignore():
+    result = evaluate_watchlist_position({"watchlist_ok": False}, LocationScoreConfig())
+    assert result["state"] == "IGNORE"
+    assert result["location_score"] == 0
+    assert "NOT_ON_WATCHLIST" in result["vetoes"]
+
+
+def test_full_pass_reaches_buy_ready_with_max_score():
+    result = evaluate_watchlist_position(_full_pass_ctx(), LocationScoreConfig())
+    assert result["location_score"] == 100
+    assert result["state"] == "BUY_READY"
+    assert result["vetoes"] == []
+
+
+def test_location_decision_exposes_supply_rr_breakdown():
+    ctx = _full_pass_ctx()
+    ctx.update({
+        "price": 100.0,
+        "support_price": 95.0,
+        "resistance_price": 115.0,
+        "supply_zone_method": "swing_high_proxy_v1",
+    })
+
+    result = evaluate_watchlist_position(ctx, LocationScoreConfig())
+
+    assert result["rr_breakdown"] == {
+        "current_price": 100.0,
+        "stop_price": 95.0,
+        "target_price": 115.0,
+        "expected_loss": 5.0,
+        "expected_reward": 15.0,
+        "rr": 3.0,
+        "supply_zone_method": "swing_high_proxy_v1",
+    }
+
+
+def test_score_in_watch_high_band():
+    ctx = {
+        "watchlist_ok": True,
+        "sector_score": None,
+        "daily_trend_ok": True,
+        "m60_trend_ok": True,
+        "daily_bull_count_5": 5,
+        "daily_bull_count_10": 10,
+        "anchor_volume_ok": True,
+        "pullback_volume_dry": False,
+        "breakout_volume_ok": True,
+        "bullish_candle_strength_ok": False,
+        "pullback_state": "in_progress",
+        "m5_ema20_distance_pct": 0.01,
+        "daily_ema10_distance_pct": 0.05,
+        "rr": 2.5,
+        "overhead_supply_close": False,
+    }
+    result = evaluate_watchlist_position(ctx, LocationScoreConfig())
+    assert result["location_score"] == 65
+    assert result["state"] == "WATCH_HIGH"
+
+
+def test_score_in_watch_band():
+    ctx = {
+        "watchlist_ok": True,
+        "sector_score": None,
+        "daily_trend_ok": True,
+        "m60_trend_ok": False,
+        "daily_bull_count_5": 0,
+        "daily_bull_count_10": 0,
+        "anchor_volume_ok": True,
+        "pullback_volume_dry": True,
+        "breakout_volume_ok": False,
+        "bullish_candle_strength_ok": False,
+        "pullback_state": "in_progress",
+        "m5_ema20_distance_pct": 0.04,
+        "daily_ema10_distance_pct": 0.11,
+        "rr": 1.5,
+        "overhead_supply_close": True,
+    }
+    result = evaluate_watchlist_position(ctx, LocationScoreConfig())
+    assert result["location_score"] == 42
+    assert result["state"] == "WATCH"
+
+
+def test_low_score_without_veto_is_ignore():
+    ctx = {
+        "watchlist_ok": True,
+        "sector_score": None,
+        "daily_trend_ok": False,
+        "m60_trend_ok": False,
+        "daily_bull_count_5": 0,
+        "daily_bull_count_10": 0,
+        "anchor_volume_ok": False,
+        "pullback_volume_dry": False,
+        "breakout_volume_ok": False,
+        "bullish_candle_strength_ok": False,
+        "pullback_state": "in_progress",
+        "m5_ema20_distance_pct": 0.04,
+        "daily_ema10_distance_pct": 0.11,
+        "rr": 1.5,
+        "overhead_supply_close": True,
+    }
+    result = evaluate_watchlist_position(ctx, LocationScoreConfig())
+    assert result["location_score"] == 23
+    assert result["state"] == "IGNORE"
+    assert result["vetoes"] == []
+
+
+def test_daily_bull_count_is_graduated_not_binary():
+    top = _full_pass_ctx()
+    top["daily_bull_count_5"], top["daily_bull_count_10"] = 4, 8
+    assert evaluate_watchlist_position(top, LocationScoreConfig())["location_score"] == 100
+
+    passing = _full_pass_ctx()
+    passing["daily_bull_count_5"], passing["daily_bull_count_10"] = 3, 5
+    result = evaluate_watchlist_position(passing, LocationScoreConfig())
+    assert result["location_score"] == 98  # 2pt below max: pass tier (3pt) vs top tier (5pt)
+    assert "일봉 양봉 개수 기준 통과" in result["reasons"]
+
+    weak = _full_pass_ctx()
+    weak["daily_bull_count_5"], weak["daily_bull_count_10"] = 2, 4
+    result = evaluate_watchlist_position(weak, LocationScoreConfig())
+    assert result["location_score"] == 96  # 4pt below max: weak tier (1pt) vs top tier (5pt)
+    assert "일봉 양봉 개수 회복" in result["wait_for"]
+
+    zero = _full_pass_ctx()
+    zero["daily_bull_count_5"], zero["daily_bull_count_10"] = 1, 2
+    result = evaluate_watchlist_position(zero, LocationScoreConfig())
+    assert result["location_score"] == 95  # full 5pt lost
+
+
+def test_no_pullback_caps_buy_ready_to_watch():
+    """Regression: v1 spec bug #1 — score 80 with no pullback must not reach BUY_READY."""
+    ctx = _full_pass_ctx()
+    ctx["pullback_state"] = "none"
+    result = evaluate_watchlist_position(ctx, LocationScoreConfig())
+    assert result["location_score"] == 80
+    assert "NO_PULLBACK" in result["vetoes"]
+    assert result["state"] == "WATCH"
+
+
+def test_rr_below_minimum_forces_ignore_even_at_high_score():
+    """Regression: v1 spec bug #2 — score 90 with RR<1.5 must be REJECT-equivalent (IGNORE)."""
+    ctx = _full_pass_ctx()
+    ctx["rr"] = 1.2
+    result = evaluate_watchlist_position(ctx, LocationScoreConfig())
+    assert result["location_score"] == 90
+    assert "RR_TOO_LOW" in result["vetoes"]
+    assert result["state"] == "IGNORE"
+
+
+def test_overheated_distance_caps_buy_ready_to_watch():
+    """Regression: v1 spec bug #3 — score 85 while overheated must not reach BUY_READY."""
+    ctx = _full_pass_ctx()
+    ctx["m5_ema20_distance_pct"] = 0.10
+    ctx["daily_ema10_distance_pct"] = 0.20
+    result = evaluate_watchlist_position(ctx, LocationScoreConfig())
+    assert result["location_score"] == 85
+    assert "OVERHEATED" in result["vetoes"]
+    assert result["state"] == "WATCH"
+
+
+def test_sector_gate_disabled_by_default_does_not_veto_weak_sector():
+    ctx = _full_pass_ctx()
+    ctx["sector_score"] = 30
+    result = evaluate_watchlist_position(ctx, LocationScoreConfig())
+    assert "SECTOR_WEAK" not in result["vetoes"]
+    assert result["state"] != "IGNORE"
+
+
+def test_sector_gate_enabled_forces_ignore_on_weak_sector():
+    ctx = _full_pass_ctx()
+    ctx["sector_score"] = 30
+    cfg = LocationScoreConfig(sector_gate_enabled=True)
+    result = evaluate_watchlist_position(ctx, cfg)
+    assert result["state"] == "IGNORE"
+    assert "SECTOR_WEAK" in result["vetoes"]
+    assert result["location_score"] == 0
+
+
+def test_missing_sector_score_recorded_as_unknown_not_false():
+    ctx = {"watchlist_ok": True}
+    result = evaluate_watchlist_position(ctx, LocationScoreConfig())
+    assert "sector_score" in result["unknown_fields"]
+    assert result["sector_score"] is None
+
+
+def test_reasons_and_wait_for_are_populated():
+    result = evaluate_watchlist_position(_full_pass_ctx(), LocationScoreConfig())
+    assert "20EMA 부근 눌림 위치" in result["reasons"]
+    assert result["wait_for"] == []
+
+    ctx = _full_pass_ctx()
+    ctx["pullback_state"] = "none"
+    result = evaluate_watchlist_position(ctx, LocationScoreConfig())
+    assert "눌림 위치 대기" in result["wait_for"]
