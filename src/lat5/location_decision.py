@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
+from lat5.daily_ma_reaction import score_daily_reaction
 from lat5.hourly_abc_support import find_five_minute_reversal_entry, find_hourly_ma60_pullback, strong_hourly_breakout_at
 from lat5.scoring import daily_trend
 
@@ -86,6 +87,35 @@ def build_context(
 
     prior_daily = daily.loc[daily.index < as_of] if not daily.empty else daily
     price = float(prior_daily["close"].iloc[-1]) if not prior_daily.empty else None
+    daily_reaction = score_daily_reaction(prior_daily, as_of)
+    daily_reaction_details = {
+        "reaction": daily_reaction.reaction,
+        "base_score": daily_reaction.base_score,
+        "quality_bonus": daily_reaction.quality_bonus,
+        "score": daily_reaction.total_score,
+        "status": daily_reaction.status,
+        "reasons": list(daily_reaction.reasons),
+        "unknown_fields": list(daily_reaction.unknown_fields),
+        "quality_components": dict(daily_reaction.quality_components),
+        "quality_reasons": list(daily_reaction.quality_reasons),
+        "quality_method": daily_reaction.quality_method,
+        "sma5": daily_reaction.sma5,
+        "sma20": daily_reaction.sma20,
+        "sma60": daily_reaction.sma60,
+        "five_day_state": (
+            daily_reaction.reaction
+            if daily_reaction.reaction in {"SMA5_RECOVERY", "SMA5_CLOSE_BREAK"}
+            else "NONE"
+        ),
+    }
+    ctx.update(
+        {
+            "daily_ma_reaction_score": daily_reaction.total_score,
+            "daily_ma_reaction_state": daily_reaction.reaction,
+            "daily_ma_reaction_reasons": list(daily_reaction.reasons),
+            "daily_ma_reaction": daily_reaction_details,
+        }
+    )
 
     if price is not None and as_of in daily_ema.index:
         ema_row = daily_ema.loc[as_of]
@@ -339,4 +369,12 @@ def evaluate_watchlist_position(ctx: dict, cfg: LocationScoreConfig) -> dict:
         "rr": rr,
         "sector_score": sector_score,
         "rr_breakdown": rr_breakdown,
+        "daily_ma_reaction": ctx.get(
+            "daily_ma_reaction",
+            {
+                "score": ctx.get("daily_ma_reaction_score", 0),
+                "reaction": ctx.get("daily_ma_reaction_state", "UNKNOWN"),
+                "reasons": list(ctx.get("daily_ma_reaction_reasons", [])),
+            },
+        ),
     }

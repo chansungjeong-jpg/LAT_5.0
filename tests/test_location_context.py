@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
+
 import pandas as pd
 import pytest
 
 from lat5.data import daily_ema_context
+from lat5.daily_ma_reaction import score_daily_reaction
 from lat5.hourly_abc_support import find_hourly_ma60_pullback, strong_hourly_breakout_at
 from lat5.location_decision import LocationScoreConfig, build_context
 
@@ -26,7 +29,30 @@ def test_build_context_with_no_data_returns_safe_defaults():
         as_of=pd.Timestamp("2026-08-10"),
         cfg=LocationScoreConfig(),
     )
-    assert ctx == {"watchlist_ok": True, "sector_score": None, "pullback_state": "none"}
+    assert ctx == {
+        "watchlist_ok": True,
+        "sector_score": None,
+        "daily_ma_reaction_score": 0,
+        "daily_ma_reaction_state": "UNKNOWN",
+        "daily_ma_reaction_reasons": ["REQUIRED_DATA_UNKNOWN"],
+        "daily_ma_reaction": {
+            "reaction": "UNKNOWN",
+            "base_score": 0,
+            "quality_bonus": 0,
+            "score": 0,
+            "status": "UNKNOWN",
+            "reasons": ["REQUIRED_DATA_UNKNOWN"],
+            "unknown_fields": ["SMA5", "SMA20", "SMA60"],
+            "quality_components": {},
+            "quality_reasons": [],
+            "quality_method": None,
+            "sma5": None,
+            "sma20": None,
+            "sma60": None,
+            "five_day_state": "NONE",
+        },
+        "pullback_state": "none",
+    }
 
 
 def _rising_daily(periods: int = 26) -> pd.DataFrame:
@@ -45,6 +71,47 @@ def _rising_daily(periods: int = 26) -> pd.DataFrame:
     )
 
 
+def _reaction_daily() -> pd.DataFrame:
+    periods = 62
+    index = pd.date_range("2026-05-01", periods=periods, freq="D")
+    closes = [100.0] * (periods - 1) + [1_000.0]
+    return pd.DataFrame(
+        {
+            "open": [99.0] * periods,
+            "high": [101.0] * periods,
+            "low": [98.0] * periods,
+            "close": closes,
+            "volume": [1_000] * periods,
+            "amount": [100_000.0] * periods,
+        },
+        index=index,
+    )
+
+
+def test_build_context_serializes_completed_daily_ma_reaction_only():
+    daily = _reaction_daily()
+    as_of = daily.index[-1]
+    expected = score_daily_reaction(daily.loc[daily.index < as_of], as_of)
+
+    ctx = build_context(
+        daily=daily,
+        daily_ema=daily_ema_context(daily),
+        hourly=_empty(["open", "high", "low", "close", "volume", "ema60", "ema120"]),
+        minutes=_empty(["open", "high", "low", "close", "volume", "ema20_5m"]),
+        as_of=as_of,
+        cfg=LocationScoreConfig(),
+    )
+
+    assert ctx["daily_ma_reaction_score"] == expected.total_score
+    assert ctx["daily_ma_reaction_state"] == expected.reaction
+    assert ctx["daily_ma_reaction_reasons"] == list(expected.reasons)
+    assert ctx["daily_ma_reaction"]["sma60"] == expected.sma60
+    assert ctx["daily_ma_reaction"]["reaction"] == expected.reaction
+    assert ctx["daily_ma_reaction"]["base_score"] == expected.base_score
+    assert ctx["daily_ma_reaction"]["quality_reasons"] == list(expected.quality_reasons)
+    json.dumps(ctx["daily_ma_reaction"])
+
+
 def test_build_context_tolerates_default_indexed_empty_frames():
     """Real KiwoomDataStore.load_daily/load_minutes return a plain empty
     DataFrame (default RangeIndex, no datetime dtype) for a brand-new ticker
@@ -60,7 +127,30 @@ def test_build_context_tolerates_default_indexed_empty_frames():
         as_of=pd.Timestamp("2026-08-10"),
         cfg=LocationScoreConfig(),
     )
-    assert ctx == {"watchlist_ok": True, "sector_score": None, "pullback_state": "none"}
+    assert ctx == {
+        "watchlist_ok": True,
+        "sector_score": None,
+        "daily_ma_reaction_score": 0,
+        "daily_ma_reaction_state": "UNKNOWN",
+        "daily_ma_reaction_reasons": ["REQUIRED_DATA_UNKNOWN"],
+        "daily_ma_reaction": {
+            "reaction": "UNKNOWN",
+            "base_score": 0,
+            "quality_bonus": 0,
+            "score": 0,
+            "status": "UNKNOWN",
+            "reasons": ["REQUIRED_DATA_UNKNOWN"],
+            "unknown_fields": ["datetime_index"],
+            "quality_components": {},
+            "quality_reasons": [],
+            "quality_method": None,
+            "sma5": None,
+            "sma20": None,
+            "sma60": None,
+            "five_day_state": "NONE",
+        },
+        "pullback_state": "none",
+    }
 
 
 def test_daily_trend_ok_true_and_distance_positive_in_uptrend():

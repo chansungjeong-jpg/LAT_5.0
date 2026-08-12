@@ -894,6 +894,7 @@ def run_hourly_pullback_reversal_baseline(
                                 "location_state": location["state"],
                                 "location_score": location["location_score"],
                                 "location_vetoes": location["vetoes"],
+                                "location_daily_ma_reaction": location.get("daily_ma_reaction"),
                             },
                         )
                         continue

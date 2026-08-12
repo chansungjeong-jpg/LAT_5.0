@@ -61,6 +61,33 @@ def test_location_decision_exposes_supply_rr_breakdown():
     }
 
 
+def test_location_decision_exposes_serialized_daily_ma_reaction_details():
+    ctx = _full_pass_ctx()
+    ctx.update(
+        {
+            "daily_ma_reaction_score": 12,
+            "daily_ma_reaction_state": "SMA20_PULLBACK_RECOVERY",
+            "daily_ma_reaction_reasons": ["SMA20_PULLBACK_RECOVERY"],
+            "daily_ma_reaction": {
+                "reaction": "SMA20_PULLBACK_RECOVERY",
+                "base_score": 8,
+                "quality_bonus": 4,
+                "score": 12,
+                "sma5": 101.0,
+                "sma20": 100.0,
+                "sma60": 95.0,
+                "quality_reasons": ["STRONG_BODY", "GOLDEN_CROSS"],
+                "five_day_state": "SMA5_RECOVERY",
+            },
+        }
+    )
+
+    result = evaluate_watchlist_position(ctx, LocationScoreConfig())
+
+    assert result["daily_ma_reaction"] == ctx["daily_ma_reaction"]
+    assert result["daily_ma_reaction"]["quality_reasons"] == ["STRONG_BODY", "GOLDEN_CROSS"]
+
+
 def test_score_in_watch_high_band():
     ctx = {
         "watchlist_ok": True,

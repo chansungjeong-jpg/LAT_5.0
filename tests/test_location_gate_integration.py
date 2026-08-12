@@ -97,10 +97,18 @@ def test_runner_allows_candidate_when_location_state_ready(monkeypatch, tmp_path
             return _empty_daily()
 
     _apply_common_monkeypatches(monkeypatch, hourly)
-    monkeypatch.setattr(
-        "lat5.backtest.evaluate_watchlist_position",
-        lambda ctx, cfg: {"state": "BUY_READY", "location_score": 90, "vetoes": []},
-    )
+    captured_contexts = []
+
+    def _ready_location(ctx, cfg):
+        captured_contexts.append(ctx)
+        return {
+            "state": "BUY_READY",
+            "location_score": 90,
+            "vetoes": [],
+            "daily_ma_reaction": {"score": ctx["daily_ma_reaction_score"]},
+        }
+
+    monkeypatch.setattr("lat5.backtest.evaluate_watchlist_position", _ready_location)
 
     trades, summary, diagnostics = run_hourly_pullback_reversal_baseline(
         Store(),
@@ -115,6 +123,9 @@ def test_runner_allows_candidate_when_location_state_ready(monkeypatch, tmp_path
     assert summary["trades"] == 1
     assert diagnostics["location_filtered_count"] == 0
     assert diagnostics["location_gate_enabled"] is True
+    assert len(captured_contexts) == 1
+    assert captured_contexts[0]["daily_ma_reaction_state"] == "UNKNOWN"
+    assert captured_contexts[0]["daily_ma_reaction_score"] == 0
 
 
 def test_runner_default_behavior_unchanged_when_location_cfg_omitted(monkeypatch, tmp_path):
