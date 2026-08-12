@@ -29,6 +29,9 @@ class DailyMAReaction:
     status: str
     reasons: tuple[str, ...]
     unknown_fields: tuple[str, ...]
+    quality_components: dict[str, int]
+    quality_reasons: tuple[str, ...]
+    quality_method: str | None
 
 
 def _sma(close: pd.Series, window: int) -> float | None:
@@ -73,6 +76,79 @@ def _unknown_result(
         status="UNKNOWN",
         reasons=("REQUIRED_DATA_UNKNOWN",),
         unknown_fields=tuple(unknown_fields),
+        quality_components={},
+        quality_reasons=(),
+        quality_method=None,
+    )
+
+
+def _quality_bonus(
+    validated: pd.DataFrame,
+    *,
+    reaction: str,
+    sma5_series: pd.Series,
+    sma20_series: pd.Series,
+    sma60_series: pd.Series,
+) -> tuple[int, dict[str, int], tuple[str, ...], str]:
+    bodies = (validated["close"] - validated["open"]).abs()
+    atr14 = _atr_series(validated).iloc[-1]
+    body_ratio = (
+        float(bodies.iloc[-1] / atr14)
+        if pd.notna(atr14) and atr14 > 0
+        else 0.0
+    )
+    recent_bodies = bodies.tail(20)
+    strong_body = (
+        len(recent_bodies) == 20
+        and body_ratio >= 0.8
+        and bodies.iloc[-1] >= float(recent_bodies.quantile(0.8))
+        and validated["close"].iloc[-1] > validated["open"].iloc[-1]
+    )
+    current_high = float(validated["high"].iloc[-1])
+    current_low = float(validated["low"].iloc[-1])
+    current_close = float(validated["close"].iloc[-1])
+    candle_range = current_high - current_low
+    close_position = (current_close - current_low) / candle_range if candle_range > 0 else None
+    close_near_high = close_position is not None and close_position >= 0.70 - 1e-12
+
+    reaction_series = {
+        "SMA60_UPWARD_CROSS_STRONG_BULL": sma60_series,
+        "SMA20_PULLBACK_RECOVERY": sma20_series,
+        "SMA5_RECOVERY": sma5_series,
+        "SMA5_CLOSE_BREAK": sma5_series,
+    }.get(reaction)
+    reaction_slope_up = (
+        reaction_series is not None
+        and pd.notna(reaction_series.iloc[-2])
+        and pd.notna(reaction_series.iloc[-1])
+        and reaction_series.iloc[-1] > reaction_series.iloc[-2]
+    )
+    previous_sma20 = sma20_series.iloc[-2]
+    previous_sma60 = sma60_series.iloc[-2]
+    current_sma20 = sma20_series.iloc[-1]
+    current_sma60 = sma60_series.iloc[-1]
+    golden_cross = (
+        previous_sma20 <= previous_sma60 and current_sma20 > current_sma60
+    )
+
+    components = {
+        "strong_body": 3 if strong_body else 0,
+        "close_near_high": 2 if close_near_high else 0,
+        "reaction_slope_up": 3 if reaction_slope_up else 0,
+        "golden_cross": 2 if golden_cross else 0,
+    }
+    reason_names = (
+        ("STRONG_BODY", strong_body),
+        ("CLOSE_NEAR_HIGH", close_near_high),
+        ("REACTION_SLOPE_UP", reaction_slope_up),
+        ("GOLDEN_CROSS", golden_cross),
+    )
+    reasons = tuple(name for name, enabled in reason_names if enabled)
+    return (
+        sum(components.values()),
+        components,
+        reasons,
+        "body_atr_ratio_and_recent_20_body_p80",
     )
 
 
@@ -164,6 +240,8 @@ def score_daily_ma_reaction(
         )
 
     sma60_series = _sma_series(close, 60)
+    sma20_series = _sma_series(close, 20)
+    sma5_series = _sma_series(close, 5)
     previous_close = float(close.iloc[-2])
     current_close = float(close.iloc[-1])
     previous_sma60 = float(sma60_series.iloc[-2])
@@ -175,82 +253,55 @@ def score_daily_ma_reaction(
         and current_close > current_sma60
         and current_close > current_open
     ):
-        return DailyMAReaction(
-            reaction="SMA60_UPWARD_CROSS_STRONG_BULL",
-            base_score=10,
-            quality_bonus=0,
-            total_score=10,
-            sma5=sma5,
-            sma20=sma20,
-            sma60=sma60,
-            status="KNOWN",
-            reasons=("SMA60_UPWARD_CROSS_STRONG_BULL",),
-            unknown_fields=(),
-        )
+        reaction = "SMA60_UPWARD_CROSS_STRONG_BULL"
+        base_score = 10
+    else:
+        atr14 = _atr_series(validated).iloc[-1]
+        current_low = float(validated["low"].iloc[-1])
+        if (
+            pd.notna(atr14)
+            and atr14 > 0
+            and current_close >= current_sma20
+            and current_close > current_open
+            and abs(current_low - current_sma20) <= 0.25 * float(atr14)
+        ):
+            reaction = "SMA20_PULLBACK_RECOVERY"
+            base_score = 8
+        else:
+            previous_sma5 = float(sma5_series.iloc[-2])
+            current_sma5 = float(sma5_series.iloc[-1])
+            if previous_close < previous_sma5 and current_close >= current_sma5:
+                reaction = "SMA5_RECOVERY"
+                base_score = 6
+            elif previous_close >= previous_sma5 and current_close < current_sma5:
+                reaction = "SMA5_CLOSE_BREAK"
+                base_score = -4
+            else:
+                reaction = "NONE"
+                base_score = 0
 
-    atr14 = _atr_series(validated).iloc[-1]
-    current_low = float(validated["low"].iloc[-1])
-    if (
-        pd.notna(atr14)
-        and atr14 > 0
-        and current_close >= current_sma20
-        and current_close > current_open
-        and abs(current_low - current_sma20) <= 0.25 * float(atr14)
-    ):
-        return DailyMAReaction(
-            reaction="SMA20_PULLBACK_RECOVERY",
-            base_score=8,
-            quality_bonus=0,
-            total_score=8,
-            sma5=sma5,
-            sma20=sma20,
-            sma60=sma60,
-            status="KNOWN",
-            reasons=("SMA20_PULLBACK_RECOVERY",),
-            unknown_fields=(),
-        )
-
-    sma5_series = _sma_series(close, 5)
-    previous_sma5 = float(sma5_series.iloc[-2])
-    current_sma5 = float(sma5_series.iloc[-1])
-    if previous_close < previous_sma5 and current_close >= current_sma5:
-        return DailyMAReaction(
-            reaction="SMA5_RECOVERY",
-            base_score=6,
-            quality_bonus=0,
-            total_score=6,
-            sma5=sma5,
-            sma20=sma20,
-            sma60=sma60,
-            status="KNOWN",
-            reasons=("SMA5_RECOVERY",),
-            unknown_fields=(),
-        )
-    if previous_close >= previous_sma5 and current_close < current_sma5:
-        return DailyMAReaction(
-            reaction="SMA5_CLOSE_BREAK",
-            base_score=-4,
-            quality_bonus=0,
-            total_score=-4,
-            sma5=sma5,
-            sma20=sma20,
-            sma60=sma60,
-            status="KNOWN",
-            reasons=("SMA5_CLOSE_BREAK",),
-            unknown_fields=(),
-        )
+    quality_bonus, quality_components, quality_reasons, quality_method = _quality_bonus(
+        validated,
+        reaction=reaction,
+        sma5_series=sma5_series,
+        sma20_series=sma20_series,
+        sma60_series=sma60_series,
+    )
 
     return DailyMAReaction(
-        reaction="NONE",
-        base_score=0,
-        quality_bonus=0,
-        total_score=0,
+        reaction=reaction,
+        base_score=base_score,
+        quality_bonus=quality_bonus,
+        total_score=min(20, base_score + quality_bonus),
         sma5=sma5,
         sma20=sma20,
         sma60=sma60,
         status="KNOWN",
-        reasons=(),
+        reasons=(reaction,) if reaction != "NONE" else (),
         unknown_fields=(),
+        quality_components=quality_components,
+        quality_reasons=quality_reasons,
+        quality_method=quality_method,
     )
 
 

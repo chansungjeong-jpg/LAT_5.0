@@ -361,3 +361,122 @@ def test_reaction_fails_closed_for_duplicate_daily_timestamp():
 
     assert result.status == "UNKNOWN"
     assert "datetime_index" in result.unknown_fields
+
+
+def strong_body_fixture() -> tuple[pd.DataFrame, pd.Timestamp]:
+    frame = frame_with_bars(70)
+    last = frame.index[-1]
+    frame.loc[last, ["open", "high", "low", "close"]] = [165.0, 172.0, 164.0, 170.0]
+    return frame, last + pd.Timedelta(days=1)
+
+
+def test_strong_body_uses_atr_and_recent_body_percentile():
+    frame, as_of = strong_body_fixture()
+
+    result = score_daily_reaction(frame, as_of=as_of)
+
+    assert "STRONG_BODY" in result.quality_reasons
+    assert result.quality_components["strong_body"] == 3
+    assert result.quality_bonus >= 3
+    assert result.quality_method == "body_atr_ratio_and_recent_20_body_p80"
+
+
+def close_near_high_fixture() -> tuple[pd.DataFrame, pd.Timestamp]:
+    frame = frame_with_bars(70)
+    last = frame.index[-1]
+    frame.loc[last, ["open", "high", "low", "close"]] = [165.0, 172.0, 164.0, 170.0]
+    return frame, last + pd.Timedelta(days=1)
+
+
+def test_close_near_high_adds_two_points():
+    frame, as_of = close_near_high_fixture()
+
+    result = score_daily_reaction(frame, as_of=as_of)
+
+    assert "CLOSE_NEAR_HIGH" in result.quality_reasons
+    assert result.quality_components["close_near_high"] == 2
+
+
+@pytest.mark.parametrize(
+    ("close", "expected"),
+    [(169.6, 2), (169.599999, 0)],
+    ids=("exactly_70_percent", "just_below_70_percent"),
+)
+def test_close_near_high_uses_inclusive_70_percent_boundary(close: float, expected: int):
+    frame, as_of = close_near_high_fixture()
+    last = frame.index[-1]
+    frame.loc[last, "close"] = close
+
+    result = score_daily_reaction(frame, as_of=as_of)
+
+    assert result.quality_components["close_near_high"] == expected
+
+
+def reaction_slope_fixture() -> tuple[pd.DataFrame, pd.Timestamp]:
+    frame, as_of = sixty_cross_fixture()
+    return frame, as_of
+
+
+def test_reaction_slope_up_adds_three_points_for_representative_sma():
+    frame, as_of = reaction_slope_fixture()
+
+    result = score_daily_reaction(frame, as_of=as_of)
+
+    assert "REACTION_SLOPE_UP" in result.quality_reasons
+    assert result.quality_components["reaction_slope_up"] == 3
+
+
+def golden_cross_fixture() -> tuple[pd.DataFrame, pd.Timestamp]:
+    frame = frame_with_bars(61)
+    frame.loc[:, "close"] = 100.0
+    frame.loc[:, "open"] = 99.0
+    frame.loc[:, "high"] = 101.0
+    frame.loc[:, "low"] = 98.0
+    last = frame.index[-1]
+    frame.loc[last, ["open", "high", "low", "close"]] = [100.0, 121.0, 99.0, 120.0]
+    return frame, last + pd.Timedelta(days=1)
+
+
+def test_sma20_crosses_above_sma60_adds_two_point_golden_cross_bonus():
+    frame, as_of = golden_cross_fixture()
+
+    result = score_daily_reaction(frame, as_of=as_of)
+
+    assert "GOLDEN_CROSS" in result.quality_reasons
+    assert result.quality_components["golden_cross"] == 2
+
+
+def test_golden_cross_requires_strict_current_sma20_above_sma60():
+    frame = frame_with_bars(61)
+    frame.loc[:, "close"] = 100.0
+    frame.loc[:, "open"] = 99.0
+    frame.loc[:, "high"] = 101.0
+    frame.loc[:, "low"] = 98.0
+    last = frame.index[-1]
+    frame.loc[last, ["open", "high", "low", "close"]] = [100.0, 101.0, 99.0, 100.0]
+
+    result = score_daily_reaction(frame, as_of=last + pd.Timedelta(days=1))
+
+    assert result.quality_components["golden_cross"] == 0
+
+
+def all_quality_conditions_fixture() -> tuple[pd.DataFrame, pd.Timestamp]:
+    frame = frame_with_bars(61)
+    frame.loc[:, "close"] = 100.0
+    frame.loc[:, "open"] = 99.0
+    frame.loc[:, "high"] = 101.0
+    frame.loc[:, "low"] = 98.0
+    previous = frame.index[-2]
+    last = frame.index[-1]
+    frame.loc[previous, ["open", "high", "low", "close"]] = [99.0, 101.0, 98.0, 99.0]
+    frame.loc[last, ["open", "high", "low", "close"]] = [100.0, 125.0, 99.0, 120.0]
+    return frame, last + pd.Timedelta(days=1)
+
+
+def test_reaction_total_is_capped_at_twenty():
+    frame, as_of = all_quality_conditions_fixture()
+
+    result = score_daily_reaction(frame, as_of=as_of)
+
+    assert result.quality_bonus > 0
+    assert result.total_score <= 20
