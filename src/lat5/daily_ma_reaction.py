@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 
 import pandas as pd
 
 
+_REQUIRED_COLUMNS = ("open", "high", "low", "close", "volume")
+
+
 @dataclass(frozen=True)
 class DailyMAReactionInputs:
+    """Completed daily bars and the beginning of the evaluation date."""
+
     daily: pd.DataFrame
     as_of: pd.Timestamp
 
@@ -53,12 +59,47 @@ def _unknown_result(
     )
 
 
-def score_daily_reaction(
+def _completed_bars(
+    daily: pd.DataFrame, as_of: pd.Timestamp
+) -> tuple[pd.DataFrame | None, tuple[str, ...]]:
+    if not isinstance(daily.index, pd.DatetimeIndex):
+        return None, ("datetime_index",)
+    if daily.index.hasnans or not daily.index.is_monotonic_increasing:
+        return None, ("datetime_index",)
+
+    try:
+        evaluation_date = pd.Timestamp(as_of)
+        if pd.isna(evaluation_date):
+            return None, ("as_of",)
+        completed = daily.loc[
+            daily.index.normalize() < evaluation_date.normalize()
+        ]
+    except (TypeError, ValueError):
+        return None, ("datetime_index",)
+    return completed, ()
+
+
+def _validated_ohlcv(
+    completed: pd.DataFrame,
+) -> tuple[pd.DataFrame, tuple[str, ...]]:
+    validated = pd.DataFrame(index=completed.index)
+    invalid_fields: list[str] = []
+    for field in _REQUIRED_COLUMNS:
+        values = pd.to_numeric(completed[field], errors="coerce")
+        finite = values.map(
+            lambda value: pd.notna(value) and isfinite(float(value))
+        )
+        if not bool(finite.all()):
+            invalid_fields.append(field)
+        validated[field] = values
+    return validated, tuple(invalid_fields)
+
+
+def score_daily_ma_reaction(
     daily: pd.DataFrame, as_of: pd.Timestamp
 ) -> DailyMAReaction:
     DailyMAReactionInputs(daily=daily, as_of=as_of)
-    required = ("open", "high", "low", "close", "volume")
-    missing = [column for column in required if column not in daily.columns]
+    missing = [column for column in _REQUIRED_COLUMNS if column not in daily.columns]
     if missing:
         return _unknown_result(
             sma5=None,
@@ -67,8 +108,26 @@ def score_daily_reaction(
             unknown_fields=missing,
         )
 
-    completed = daily.loc[daily.index <= as_of]
-    close = completed["close"]
+    completed, index_unknown = _completed_bars(daily, as_of)
+    if index_unknown:
+        return _unknown_result(
+            sma5=None,
+            sma20=None,
+            sma60=None,
+            unknown_fields=list(index_unknown),
+        )
+
+    assert completed is not None
+    validated, invalid_fields = _validated_ohlcv(completed)
+    if invalid_fields:
+        return _unknown_result(
+            sma5=None,
+            sma20=None,
+            sma60=None,
+            unknown_fields=list(invalid_fields),
+        )
+
+    close = validated["close"]
     sma5 = _sma(close, 5)
     sma20 = _sma(close, 20)
     sma60 = _sma(close, 60)
@@ -97,3 +156,14 @@ def score_daily_reaction(
         reasons=(),
         unknown_fields=(),
     )
+
+
+score_daily_reaction = score_daily_ma_reaction
+
+
+__all__ = [
+    "DailyMAReactionInputs",
+    "DailyMAReaction",
+    "score_daily_ma_reaction",
+    "score_daily_reaction",
+]
