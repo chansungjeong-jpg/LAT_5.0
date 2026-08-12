@@ -11,6 +11,20 @@ from lat5.location_score import evaluate_daily_ma_reaction_gate
 from lat5.scoring import daily_trend
 
 
+_REQUIRED_ENTRY_CONTEXT_FIELDS = (
+    "weekly_trend_ok",
+    "m60_trend_ok",
+    "m60_slope_pct",
+    "daily_trend_ok",
+)
+
+
+def _is_unknown_required_context(value: object) -> bool:
+    return value is None or (
+        isinstance(value, str) and value.strip().upper() == "UNKNOWN"
+    )
+
+
 @dataclass(frozen=True)
 class LocationScoreWeights:
     sector_flow: int = 15
@@ -248,6 +262,7 @@ def evaluate_watchlist_position(ctx: dict, cfg: LocationScoreConfig) -> dict:
     if not ctx.get("watchlist_ok", False):
         return {
             "state": "IGNORE",
+            "entry_eligible": False,
             "location_score": 0,
             "vetoes": ["NOT_ON_WATCHLIST"],
             "reasons": ["Watchlist 제외 종목"],
@@ -263,6 +278,7 @@ def evaluate_watchlist_position(ctx: dict, cfg: LocationScoreConfig) -> dict:
     ):
         return {
             "state": "IGNORE",
+            "entry_eligible": False,
             "location_score": 0,
             "vetoes": ["SECTOR_WEAK"],
             "reasons": ["섹터 돈흐름 약함"],
@@ -289,11 +305,20 @@ def evaluate_watchlist_position(ctx: dict, cfg: LocationScoreConfig) -> dict:
     unknown_fields.extend(daily_reaction_gate.unknown_fields)
     vetoes.extend(daily_reaction_gate.vetoes)
 
-    if ctx.get("daily_trend_ok"):
+    required_context_unknown_fields = [
+        field
+        for field in _REQUIRED_ENTRY_CONTEXT_FIELDS
+        if _is_unknown_required_context(ctx.get(field))
+    ]
+    if required_context_unknown_fields:
+        unknown_fields.extend(required_context_unknown_fields)
+        vetoes.append("ENTRY_PREREQUISITE_UNKNOWN")
+
+    if ctx.get("daily_trend_ok") is True:
         reasons.append("일봉 추세 양호")
     else:
         wait_for.append("일봉 10EMA 회복")
-    if ctx.get("m60_trend_ok"):
+    if ctx.get("m60_trend_ok") is True:
         reasons.append("60분 추세 회복")
     else:
         wait_for.append("60분 추세 회복")
@@ -355,8 +380,7 @@ def evaluate_watchlist_position(ctx: dict, cfg: LocationScoreConfig) -> dict:
         vetoes.append("RR_TOO_LOW")
 
     slope_pct = ctx.get("m60_slope_pct")
-    if slope_pct is None:
-        unknown_fields.append("m60_slope_pct")
+    if _is_unknown_required_context(slope_pct):
         slope_score = 0
     elif float(slope_pct) <= 0:
         slope_score = 0
@@ -364,9 +388,6 @@ def evaluate_watchlist_position(ctx: dict, cfg: LocationScoreConfig) -> dict:
         slope_score = 5
     else:
         slope_score = 10
-
-    if ctx.get("weekly_trend_ok") is None:
-        unknown_fields.append("weekly_trend_ok")
 
     if bull5 is None:
         recent_bullish_score = 0
@@ -386,12 +407,12 @@ def evaluate_watchlist_position(ctx: dict, cfg: LocationScoreConfig) -> dict:
                 "breakout_volume_ok",
             )
         ),
-        "m60_location": 20 if ctx.get("m60_trend_ok") else 0,
+        "m60_location": 20 if ctx.get("m60_trend_ok") is True else 0,
         "daily_ma_reaction": daily_reaction_gate.component,
-        "weekly_trend": 10 if ctx.get("weekly_trend_ok") else 0,
+        "weekly_trend": 10 if ctx.get("weekly_trend_ok") is True else 0,
         "slope": slope_score,
         "recent_5d_bullish": recent_bullish_score,
-        "daily_trend_persistence": 5 if ctx.get("daily_trend_ok") else 0,
+        "daily_trend_persistence": 5 if ctx.get("daily_trend_ok") is True else 0,
     }
     score = sum(score_components.values())
     if daily_reaction_gate.component > 0:
@@ -427,6 +448,13 @@ def evaluate_watchlist_position(ctx: dict, cfg: LocationScoreConfig) -> dict:
     elif ("NO_PULLBACK" in vetoes or "OVERHEATED" in vetoes) and state == "BUY_READY":
         state = "WATCH"
 
+    if "ENTRY_PREREQUISITE_UNKNOWN" in vetoes and state == "BUY_READY":
+        state = "WATCH_HIGH"
+
+    vetoes = list(dict.fromkeys(vetoes))
+    unknown_fields = list(dict.fromkeys(unknown_fields))
+    entry_eligible = state == "BUY_READY" and not vetoes
+
     current_price = ctx.get("price")
     stop_price = ctx.get("support_price")
     target_price = ctx.get("resistance_price")
@@ -447,6 +475,7 @@ def evaluate_watchlist_position(ctx: dict, cfg: LocationScoreConfig) -> dict:
 
     return {
         "state": state,
+        "entry_eligible": entry_eligible,
         "location_score": score,
         "score_components": score_components,
         "vetoes": vetoes,

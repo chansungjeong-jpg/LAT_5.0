@@ -306,6 +306,29 @@ def test_no_pullback_caps_buy_ready_to_watch():
     assert result["location_score"] == 80
     assert "NO_PULLBACK" in result["vetoes"]
     assert result["state"] == "WATCH"
+    assert result["entry_eligible"] is False
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected_veto"),
+    [
+        ("pullback_state", "none", "NO_PULLBACK"),
+        ("m5_ema20_distance_pct", 0.10, "OVERHEATED"),
+    ],
+)
+def test_score_70_watch_high_preserves_observation_but_blocks_entry(
+    field: str, value: object, expected_veto: str
+):
+    ctx = _full_pass_ctx()
+    ctx["breakout_volume_ok"] = False
+    ctx[field] = value
+
+    result = evaluate_watchlist_position(ctx, LocationScoreConfig())
+
+    assert result["location_score"] == 70
+    assert result["state"] == "WATCH_HIGH"
+    assert expected_veto in result["vetoes"]
+    assert result["entry_eligible"] is False
 
 
 def test_rr_below_minimum_forces_ignore_even_at_high_score():
@@ -327,6 +350,7 @@ def test_overheated_distance_caps_buy_ready_to_watch():
     assert result["location_score"] == 80
     assert "OVERHEATED" in result["vetoes"]
     assert result["state"] == "WATCH"
+    assert result["entry_eligible"] is False
 
 
 def test_sector_gate_disabled_by_default_does_not_veto_weak_sector():
@@ -352,6 +376,44 @@ def test_missing_sector_score_recorded_as_unknown_not_false():
     result = evaluate_watchlist_position(ctx, LocationScoreConfig())
     assert "sector_score" in result["unknown_fields"]
     assert result["sector_score"] is None
+
+
+@pytest.mark.parametrize(
+    ("field", "mode"),
+    [
+        ("weekly_trend_ok", "missing"),
+        ("weekly_trend_ok", "UNKNOWN"),
+        ("m60_trend_ok", "missing"),
+        ("m60_trend_ok", "UNKNOWN"),
+        ("m60_slope_pct", "missing"),
+        ("m60_slope_pct", "UNKNOWN"),
+        ("daily_trend_ok", "missing"),
+        ("daily_trend_ok", "UNKNOWN"),
+    ],
+)
+def test_required_entry_context_unknown_is_preserved_and_fails_closed(
+    field: str, mode: str
+):
+    ctx = _full_pass_ctx()
+    if mode == "missing":
+        ctx.pop(field)
+    else:
+        ctx[field] = mode
+
+    result = evaluate_watchlist_position(ctx, LocationScoreConfig())
+
+    assert field in result["unknown_fields"]
+    assert "ENTRY_PREREQUISITE_UNKNOWN" in result["vetoes"]
+    assert result["state"] == "WATCH_HIGH"
+    assert result["entry_eligible"] is False
+
+
+def test_buy_ready_with_confirmed_prerequisites_is_entry_eligible():
+    result = evaluate_watchlist_position(_full_pass_ctx(), LocationScoreConfig())
+
+    assert result["state"] == "BUY_READY"
+    assert result["vetoes"] == []
+    assert result["entry_eligible"] is True
 
 
 def test_reasons_and_wait_for_are_populated():

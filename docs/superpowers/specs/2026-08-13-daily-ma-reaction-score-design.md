@@ -148,3 +148,20 @@ SMA5 / SMA20 / SMA60 값과 기울기
 - 5일선 이탈 다음 날 회복 시나리오를 별도로 검증한다.
 - 점수 통과와 Hard Block 통과를 별도 테스트한다.
 - 백테스트에서는 기존 위치 점수와 새 이평선 반응 점수를 동일 기간에 비교한다.
+
+## 9. 진입 자격 fail-closed 계약
+
+`state`는 `BUY_READY`, `WATCH_HIGH`, `WATCH`, `IGNORE`의 관찰·분류 의미를 유지한다.
+실제 신규 진입 가능 여부는 별도 불리언 `entry_eligible`로 명시한다.
+
+- `entry_eligible=true`는 `state=BUY_READY`이고 모든 진입 전제조건이 확인된 경우에만 가능하다.
+- `WATCH_HIGH`는 높은 관찰 우선순위일 뿐 진입 가능 상태가 아니며 항상
+  `entry_eligible=false`다.
+- `NO_PULLBACK` 또는 `OVERHEATED` veto가 있으면 점수와 무관하게
+  `entry_eligible=false`다.
+- `weekly_trend_ok`, `m60_trend_ok`, `m60_slope_pct`, `daily_trend_ok`가 누락되거나
+  `None` 또는 `UNKNOWN`이면 필드명을 `unknown_fields`에 보존하고
+  `ENTRY_PREREQUISITE_UNKNOWN` veto를 남긴 뒤 `entry_eligible=false`로 종료한다.
+- 백테스트는 `entry_eligible is True`인 판정만 진입 경로로 전달한다. 필드가 없는
+  레거시·불완전 payload도 진입 불가로 처리한다.
+- diagnostics와 ledger에는 `entry_eligible`, veto, `unknown_fields`를 함께 보존한다.

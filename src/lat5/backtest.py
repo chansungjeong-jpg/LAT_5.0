@@ -42,6 +42,7 @@ def _location_ledger_evidence(location: dict[str, object] | None) -> dict[str, o
     rr_breakdown = location.get("rr_breakdown")
     return {
         "location_state": location["state"],
+        "location_entry_eligible": location.get("entry_eligible") is True,
         "location_score": location["location_score"],
         "location_vetoes": location.get("vetoes", []),
         "location_unknown_fields": location.get("unknown_fields", []),
@@ -908,6 +909,7 @@ def run_hourly_pullback_reversal_baseline(
                             "name": item.name,
                             "evaluated_at": str(confirm_time),
                             "final_state": location["state"],
+                            "entry_eligible": location.get("entry_eligible") is True,
                             "location_score": location["location_score"],
                             "vetoes": list(location.get("vetoes", [])),
                             "unknown_fields": list(location.get("unknown_fields", [])),
@@ -915,7 +917,7 @@ def run_hourly_pullback_reversal_baseline(
                             "rr_breakdown": location.get("rr_breakdown"),
                         }
                     )
-                    if location["state"] not in ("BUY_READY", "WATCH_HIGH"):
+                    if location.get("entry_eligible") is not True:
                         reason = "LOCATION_FILTERED"
                         reason_counts[reason] += 1
                         location_filtered_count += 1
