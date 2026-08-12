@@ -38,6 +38,23 @@ def _sma(close: pd.Series, window: int) -> float | None:
     return float(values.mean())
 
 
+def _sma_series(close: pd.Series, window: int) -> pd.Series:
+    return close.rolling(window=window, min_periods=window).mean()
+
+
+def _atr_series(validated: pd.DataFrame, window: int = 14) -> pd.Series:
+    previous_close = validated["close"].shift(1)
+    true_range = pd.concat(
+        [
+            validated["high"] - validated["low"],
+            (validated["high"] - previous_close).abs(),
+            (validated["low"] - previous_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    return true_range.rolling(window=window, min_periods=window).mean()
+
+
 def _unknown_result(
     *,
     sma5: float | None,
@@ -144,6 +161,83 @@ def score_daily_ma_reaction(
             sma20=sma20,
             sma60=sma60,
             unknown_fields=unknown_fields,
+        )
+
+    sma60_series = _sma_series(close, 60)
+    previous_close = float(close.iloc[-2])
+    current_close = float(close.iloc[-1])
+    previous_sma60 = float(sma60_series.iloc[-2])
+    current_sma60 = float(sma60_series.iloc[-1])
+    current_sma20 = float(sma20)
+    current_open = float(validated["open"].iloc[-1])
+    if (
+        previous_close <= previous_sma60
+        and current_close > current_sma60
+        and current_close > current_open
+    ):
+        return DailyMAReaction(
+            reaction="SMA60_UPWARD_CROSS_STRONG_BULL",
+            base_score=10,
+            quality_bonus=0,
+            total_score=10,
+            sma5=sma5,
+            sma20=sma20,
+            sma60=sma60,
+            status="KNOWN",
+            reasons=("SMA60_UPWARD_CROSS_STRONG_BULL",),
+            unknown_fields=(),
+        )
+
+    atr14 = _atr_series(validated).iloc[-1]
+    current_low = float(validated["low"].iloc[-1])
+    if (
+        pd.notna(atr14)
+        and atr14 > 0
+        and current_close >= current_sma20
+        and current_close > current_open
+        and abs(current_low - current_sma20) <= 0.25 * float(atr14)
+    ):
+        return DailyMAReaction(
+            reaction="SMA20_PULLBACK_RECOVERY",
+            base_score=8,
+            quality_bonus=0,
+            total_score=8,
+            sma5=sma5,
+            sma20=sma20,
+            sma60=sma60,
+            status="KNOWN",
+            reasons=("SMA20_PULLBACK_RECOVERY",),
+            unknown_fields=(),
+        )
+
+    sma5_series = _sma_series(close, 5)
+    previous_sma5 = float(sma5_series.iloc[-2])
+    current_sma5 = float(sma5_series.iloc[-1])
+    if previous_close < previous_sma5 and current_close >= current_sma5:
+        return DailyMAReaction(
+            reaction="SMA5_RECOVERY",
+            base_score=6,
+            quality_bonus=0,
+            total_score=6,
+            sma5=sma5,
+            sma20=sma20,
+            sma60=sma60,
+            status="KNOWN",
+            reasons=("SMA5_RECOVERY",),
+            unknown_fields=(),
+        )
+    if previous_close >= previous_sma5 and current_close < current_sma5:
+        return DailyMAReaction(
+            reaction="SMA5_CLOSE_BREAK",
+            base_score=-4,
+            quality_bonus=0,
+            total_score=-4,
+            sma5=sma5,
+            sma20=sma20,
+            sma60=sma60,
+            status="KNOWN",
+            reasons=("SMA5_CLOSE_BREAK",),
+            unknown_fields=(),
         )
 
     return DailyMAReaction(
