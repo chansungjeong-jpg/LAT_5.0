@@ -49,7 +49,7 @@ def test_build_context_with_no_data_returns_safe_defaults():
             "sma5": None,
             "sma20": None,
             "sma60": None,
-            "five_day_state": "NONE",
+            "five_day_state": "UNKNOWN",
         },
         "pullback_state": "none",
     }
@@ -109,6 +109,7 @@ def test_build_context_serializes_completed_daily_ma_reaction_only():
     assert ctx["daily_ma_reaction"]["reaction"] == expected.reaction
     assert ctx["daily_ma_reaction"]["base_score"] == expected.base_score
     assert ctx["daily_ma_reaction"]["quality_reasons"] == list(expected.quality_reasons)
+    assert ctx["daily_ma_reaction"]["five_day_state"] == expected.five_day_state
     json.dumps(ctx["daily_ma_reaction"])
 
 
@@ -147,7 +148,7 @@ def test_build_context_tolerates_default_indexed_empty_frames():
             "sma5": None,
             "sma20": None,
             "sma60": None,
-            "five_day_state": "NONE",
+            "five_day_state": "UNKNOWN",
         },
         "pullback_state": "none",
     }

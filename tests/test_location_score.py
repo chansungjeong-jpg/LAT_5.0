@@ -68,16 +68,18 @@ def test_daily_ma_reaction_does_not_exceed_total_component_cap():
     assert result.components["daily_ma_reaction"] == 20
 
 
-def test_daily_ma_reaction_unknown_is_zero_without_rejecting_location_decision():
+def test_daily_ma_reaction_unknown_fails_closed():
     result = score_location(
         _strong_inputs(daily_ma_reaction_score=20, daily_ma_reaction_state="UNKNOWN")
     )
 
-    assert result.state == "BUY"
+    assert result.state == "REJECT"
     assert result.components["daily_ma_reaction"] == 0
+    assert "daily_ma_reaction" in result.unknown_fields
+    assert "DAILY_MA_REACTION_UNKNOWN" in result.vetoes
 
 
-def test_daily_ma_reaction_none_is_zero_without_rejecting_location_decision():
+def test_missing_daily_ma_reaction_score_fails_closed():
     result = score_location(
         _strong_inputs(
             daily_ma_reaction_score=None,
@@ -85,8 +87,10 @@ def test_daily_ma_reaction_none_is_zero_without_rejecting_location_decision():
         )
     )
 
-    assert result.state == "BUY"
+    assert result.state == "REJECT"
     assert result.components["daily_ma_reaction"] == 0
+    assert "daily_ma_reaction" in result.unknown_fields
+    assert "DAILY_MA_REACTION_UNKNOWN" in result.vetoes
 
 
 def test_sma5_break_can_make_watch_but_is_not_hard_reject_by_itself():
@@ -99,8 +103,21 @@ def test_sma5_break_can_make_watch_but_is_not_hard_reject_by_itself():
     )
 
     assert result.state == "WATCH"
-    assert result.components["daily_ma_reaction"] == 0
+    assert result.components["daily_ma_reaction"] == -4
     assert "DAILY_MA_HARD_BLOCK" not in result.vetoes
+
+
+def test_sma20_close_break_is_a_daily_ma_hard_block():
+    result = score_location(
+        _strong_inputs(
+            daily_ma_reaction_score=-8,
+            daily_ma_reaction_state="SMA20_CLOSE_BREAK",
+        )
+    )
+
+    assert result.state == "REJECT"
+    assert result.components["daily_ma_reaction"] == -8
+    assert "DAILY_MA_HARD_BLOCK" in result.vetoes
 
 
 def test_golden_cross_is_not_a_standalone_location_bonus():

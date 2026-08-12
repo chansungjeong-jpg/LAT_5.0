@@ -151,3 +151,31 @@ def test_runner_default_behavior_unchanged_when_location_cfg_omitted(monkeypatch
 
     assert summary["trades"] == 1
     assert diagnostics["location_gate_enabled"] is False
+
+
+def test_runner_fails_closed_when_daily_reaction_data_is_unknown(monkeypatch, tmp_path):
+    hourly, minutes = _hourly_and_minutes()
+
+    class Store:
+        def load_minutes(self, ticker):
+            return minutes
+
+        def load_daily(self, ticker):
+            return _empty_daily()
+
+    _apply_common_monkeypatches(monkeypatch, hourly)
+
+    trades, summary, diagnostics = run_hourly_pullback_reversal_baseline(
+        Store(),
+        [WatchItem("005930", "Samsung", "Semiconductor")],
+        tmp_path / "paper.db",
+        BacktestConfig(commission_bps=0, sell_tax_bps=0, slippage_bps=0),
+        start="2026-08-07",
+        end="2026-08-07",
+        location_cfg=LocationScoreConfig(),
+    )
+
+    assert trades.empty
+    assert summary["trades"] == 0
+    assert diagnostics["location_filtered_count"] == 1
+    assert diagnostics["reason_counts"]["LOCATION_FILTERED"] == 1

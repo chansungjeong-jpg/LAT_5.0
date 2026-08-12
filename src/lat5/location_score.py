@@ -36,6 +36,24 @@ class LocationDecision:
     reasons: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class DailyMAReactionGate:
+    component: int
+    vetoes: tuple[str, ...]
+    unknown_fields: tuple[str, ...]
+
+
+_KNOWN_DAILY_MA_REACTIONS = {
+    "SMA60_UPWARD_CROSS_STRONG_BULL",
+    "SMA20_PULLBACK_RECOVERY",
+    "SMA5_RECOVERY",
+    "SMA5_HOLD",
+    "NONE",
+    "SMA5_CLOSE_BREAK",
+    "SMA20_CLOSE_BREAK",
+}
+
+
 def _known(value: object) -> bool:
     return value is not None and isfinite(float(value))
 
@@ -72,10 +90,33 @@ def _slope_score(slope_pct: float) -> int:
     return 10
 
 
-def _daily_ma_reaction_component(score: int | None, state: str | None) -> int:
-    if score is None or state in {None, "UNKNOWN"} or not _known(score):
-        return 0
-    return min(20, max(0, int(score)))
+def evaluate_daily_ma_reaction_gate(
+    score: int | None,
+    state: str | None,
+    unknown_fields: tuple[str, ...] = (),
+) -> DailyMAReactionGate:
+    if (
+        score is None
+        or state not in _KNOWN_DAILY_MA_REACTIONS
+        or not _known(score)
+    ):
+        fields = (
+            tuple(f"daily_ma_reaction.{field}" for field in unknown_fields)
+            if unknown_fields
+            else ("daily_ma_reaction",)
+        )
+        return DailyMAReactionGate(
+            component=0,
+            vetoes=("DAILY_MA_REACTION_UNKNOWN",),
+            unknown_fields=fields,
+        )
+    if state == "SMA20_CLOSE_BREAK":
+        return DailyMAReactionGate(-8, ("DAILY_MA_HARD_BLOCK",), ())
+    if state == "SMA5_CLOSE_BREAK":
+        return DailyMAReactionGate(-4, ("DAILY_MA_WATCH_PRESSURE",), ())
+    if state == "NONE":
+        return DailyMAReactionGate(0, (), ())
+    return DailyMAReactionGate(min(20, max(0, int(score))), (), ())
 
 
 def score_location(inputs: LocationInputs) -> LocationDecision:
@@ -116,14 +157,15 @@ def score_location(inputs: LocationInputs) -> LocationDecision:
     if float(inputs.rr) < 1.5:
         vetoes.append("RR_BELOW_1_5")
 
+    daily_reaction_gate = evaluate_daily_ma_reaction_gate(
+        inputs.daily_ma_reaction_score, inputs.daily_ma_reaction_state
+    )
     components = {
         "volume": _volume_score(float(inputs.volume_ratio)),
         "m60_location": _m60_location_score(
             float(inputs.price), float(inputs.ema60), float(inputs.ema120)
         ),
-        "daily_ma_reaction": _daily_ma_reaction_component(
-            inputs.daily_ma_reaction_score, inputs.daily_ma_reaction_state
-        ),
+        "daily_ma_reaction": daily_reaction_gate.component,
         "weekly_trend": 10 if inputs.weekly_trend_ok else 0,
         "daily_trend": 5 if inputs.daily_trend_ok else 0,
         "slope": _slope_score(float(inputs.m60_slope_pct)),
@@ -134,6 +176,9 @@ def score_location(inputs: LocationInputs) -> LocationDecision:
     }
     score = sum(components.values())
 
+    unknown.extend(daily_reaction_gate.unknown_fields)
+    vetoes.extend(daily_reaction_gate.vetoes)
+
     if float(inputs.m5_distance_pct) > 0.03:
         vetoes.append("M5_DISTANCE_OVERHEATED")
     if float(inputs.daily_distance_pct) > 0.10:
@@ -142,11 +187,18 @@ def score_location(inputs: LocationInputs) -> LocationDecision:
     hard_vetoes = {
         "MARKET_NOT_BUYABLE", "SECTOR_SCORE_BELOW_60", "NOT_LEADER_CANDIDATE",
         "WEEKLY_TREND_INVALID", "DAILY_TREND_INVALID", "SUPPLY_PROXY_INVALID",
-        "RR_BELOW_1_5",
+        "RR_BELOW_1_5", "DAILY_MA_REACTION_UNKNOWN", "DAILY_MA_HARD_BLOCK",
     }
     if any(v in hard_vetoes for v in vetoes):
         state = "REJECT"
-    elif any(v in vetoes for v in ("M5_DISTANCE_OVERHEATED", "DAILY_DISTANCE_OVERHEATED")):
+    elif any(
+        v in vetoes
+        for v in (
+            "M5_DISTANCE_OVERHEATED",
+            "DAILY_DISTANCE_OVERHEATED",
+            "DAILY_MA_WATCH_PRESSURE",
+        )
+    ):
         state = "WATCH"
     elif score >= 70:
         state = "BUY"
@@ -155,4 +207,6 @@ def score_location(inputs: LocationInputs) -> LocationDecision:
     else:
         state = "REJECT"
 
-    return LocationDecision(state, score, components, tuple(vetoes), (), tuple(reasons))
+    return LocationDecision(
+        state, score, components, tuple(vetoes), tuple(unknown), tuple(reasons)
+    )

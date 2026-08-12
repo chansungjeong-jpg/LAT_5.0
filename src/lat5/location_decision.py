@@ -6,6 +6,7 @@ import pandas as pd
 
 from lat5.daily_ma_reaction import score_daily_reaction
 from lat5.hourly_abc_support import find_five_minute_reversal_entry, find_hourly_ma60_pullback, strong_hourly_breakout_at
+from lat5.location_score import evaluate_daily_ma_reaction_gate
 from lat5.scoring import daily_trend
 
 
@@ -102,11 +103,7 @@ def build_context(
         "sma5": daily_reaction.sma5,
         "sma20": daily_reaction.sma20,
         "sma60": daily_reaction.sma60,
-        "five_day_state": (
-            daily_reaction.reaction
-            if daily_reaction.reaction in {"SMA5_RECOVERY", "SMA5_CLOSE_BREAK"}
-            else "NONE"
-        ),
+        "five_day_state": daily_reaction.five_day_state,
     }
     ctx.update(
         {
@@ -247,6 +244,20 @@ def evaluate_watchlist_position(ctx: dict, cfg: LocationScoreConfig) -> dict:
             score += 10
             reasons.append("섹터 돈흐름 보통 이상")
 
+    reaction_payload = ctx.get("daily_ma_reaction")
+    reaction_unknown_fields = (
+        tuple(str(field) for field in reaction_payload.get("unknown_fields", []))
+        if isinstance(reaction_payload, dict)
+        else ()
+    )
+    daily_reaction_gate = evaluate_daily_ma_reaction_gate(
+        ctx.get("daily_ma_reaction_score"),
+        ctx.get("daily_ma_reaction_state"),
+        reaction_unknown_fields,
+    )
+    unknown_fields.extend(daily_reaction_gate.unknown_fields)
+    vetoes.extend(daily_reaction_gate.vetoes)
+
     if ctx.get("daily_trend_ok"):
         score += 5
         reasons.append("일봉 추세 양호")
@@ -327,6 +338,16 @@ def evaluate_watchlist_position(ctx: dict, cfg: LocationScoreConfig) -> dict:
         wait_for.append("손익비 1.5 이상 자리 대기")
         vetoes.append("RR_TOO_LOW")
 
+    score = max(0, min(100, score + daily_reaction_gate.component))
+    if daily_reaction_gate.component > 0:
+        reasons.append("일봉 이평선 반응 점수 반영")
+    if "DAILY_MA_WATCH_PRESSURE" in daily_reaction_gate.vetoes:
+        wait_for.append("SMA5 종가 회복")
+    if "DAILY_MA_REACTION_UNKNOWN" in daily_reaction_gate.vetoes:
+        wait_for.append("일봉 이평선 필수 데이터 확인")
+    if "DAILY_MA_HARD_BLOCK" in daily_reaction_gate.vetoes:
+        wait_for.append("SMA20 종가 회복")
+
     if score >= cfg.buy_ready:
         state = "BUY_READY"
     elif score >= cfg.watch_high:
@@ -338,6 +359,16 @@ def evaluate_watchlist_position(ctx: dict, cfg: LocationScoreConfig) -> dict:
 
     if "RR_TOO_LOW" in vetoes:
         state = "IGNORE"
+    elif any(
+        veto in vetoes
+        for veto in ("DAILY_MA_REACTION_UNKNOWN", "DAILY_MA_HARD_BLOCK")
+    ):
+        state = "IGNORE"
+    elif "DAILY_MA_WATCH_PRESSURE" in vetoes and state in {
+        "BUY_READY",
+        "WATCH_HIGH",
+    }:
+        state = "WATCH"
     elif ("NO_PULLBACK" in vetoes or "OVERHEATED" in vetoes) and state == "BUY_READY":
         state = "WATCH"
 

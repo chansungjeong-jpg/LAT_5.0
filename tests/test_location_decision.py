@@ -22,6 +22,13 @@ def _full_pass_ctx() -> dict:
         "daily_ema10_distance_pct": 0.05,
         "rr": 2.5,
         "overhead_supply_close": False,
+        "daily_ma_reaction_score": 0,
+        "daily_ma_reaction_state": "NONE",
+        "daily_ma_reaction": {
+            "reaction": "NONE",
+            "score": 0,
+            "unknown_fields": [],
+        },
     }
 
 
@@ -105,6 +112,8 @@ def test_score_in_watch_high_band():
         "daily_ema10_distance_pct": 0.05,
         "rr": 2.5,
         "overhead_supply_close": False,
+        "daily_ma_reaction_score": 0,
+        "daily_ma_reaction_state": "NONE",
     }
     result = evaluate_watchlist_position(ctx, LocationScoreConfig())
     assert result["location_score"] == 65
@@ -128,6 +137,8 @@ def test_score_in_watch_band():
         "daily_ema10_distance_pct": 0.11,
         "rr": 1.5,
         "overhead_supply_close": True,
+        "daily_ma_reaction_score": 0,
+        "daily_ma_reaction_state": "NONE",
     }
     result = evaluate_watchlist_position(ctx, LocationScoreConfig())
     assert result["location_score"] == 42
@@ -151,6 +162,8 @@ def test_low_score_without_veto_is_ignore():
         "daily_ema10_distance_pct": 0.11,
         "rr": 1.5,
         "overhead_supply_close": True,
+        "daily_ma_reaction_score": 0,
+        "daily_ma_reaction_state": "NONE",
     }
     result = evaluate_watchlist_position(ctx, LocationScoreConfig())
     assert result["location_score"] == 23
@@ -246,3 +259,76 @@ def test_reasons_and_wait_for_are_populated():
     ctx["pullback_state"] = "none"
     result = evaluate_watchlist_position(ctx, LocationScoreConfig())
     assert "눌림 위치 대기" in result["wait_for"]
+
+
+@pytest.mark.parametrize(
+    ("reaction", "reaction_score"),
+    [("SMA5_HOLD", 3), ("SMA5_RECOVERY", 6)],
+)
+def test_positive_daily_reactions_raise_the_actual_location_score(
+    reaction: str, reaction_score: int
+):
+    ctx = _full_pass_ctx()
+    ctx["anchor_volume_ok"] = False
+    ctx["daily_ma_reaction_state"] = reaction
+    ctx["daily_ma_reaction_score"] = reaction_score
+
+    result = evaluate_watchlist_position(ctx, LocationScoreConfig())
+
+    assert result["location_score"] == 92 + reaction_score
+
+
+def test_strong_daily_reaction_can_promote_watch_high_to_buy_ready():
+    ctx = _full_pass_ctx()
+    ctx["anchor_volume_ok"] = False
+    ctx["pullback_volume_dry"] = False
+    ctx["breakout_volume_ok"] = False
+    ctx["bullish_candle_strength_ok"] = False
+    ctx["daily_ma_reaction_state"] = "SMA60_UPWARD_CROSS_STRONG_BULL"
+    ctx["daily_ma_reaction_score"] = 20
+
+    result = evaluate_watchlist_position(ctx, LocationScoreConfig())
+
+    assert result["location_score"] == 95
+    assert result["state"] == "BUY_READY"
+
+
+def test_sma5_close_break_deducts_score_and_applies_watch_pressure():
+    ctx = _full_pass_ctx()
+    ctx["daily_ma_reaction_state"] = "SMA5_CLOSE_BREAK"
+    ctx["daily_ma_reaction_score"] = -4
+
+    result = evaluate_watchlist_position(ctx, LocationScoreConfig())
+
+    assert result["location_score"] == 96
+    assert result["state"] == "WATCH"
+    assert "DAILY_MA_WATCH_PRESSURE" in result["vetoes"]
+
+
+def test_sma20_close_break_vetoes_buy_ready():
+    ctx = _full_pass_ctx()
+    ctx["daily_ma_reaction_state"] = "SMA20_CLOSE_BREAK"
+    ctx["daily_ma_reaction_score"] = -8
+
+    result = evaluate_watchlist_position(ctx, LocationScoreConfig())
+
+    assert result["state"] == "IGNORE"
+    assert "DAILY_MA_HARD_BLOCK" in result["vetoes"]
+
+
+def test_unknown_daily_reaction_vetoes_buy_ready_and_exposes_unknown_fields():
+    ctx = _full_pass_ctx()
+    ctx["daily_ma_reaction_state"] = "UNKNOWN"
+    ctx["daily_ma_reaction_score"] = 0
+    ctx["daily_ma_reaction"] = {
+        "reaction": "UNKNOWN",
+        "score": 0,
+        "unknown_fields": ["SMA60", "ATR14"],
+    }
+
+    result = evaluate_watchlist_position(ctx, LocationScoreConfig())
+
+    assert result["state"] == "IGNORE"
+    assert "DAILY_MA_REACTION_UNKNOWN" in result["vetoes"]
+    assert "daily_ma_reaction.SMA60" in result["unknown_fields"]
+    assert "daily_ma_reaction.ATR14" in result["unknown_fields"]
