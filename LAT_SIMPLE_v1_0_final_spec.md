@@ -476,9 +476,10 @@ ABC 패턴은 공식 매수 조건에서 폐기하며, 기존 ABC 코드는 과�
 | 구성 요소 | 배점 |
 |---|---:|
 | 거래량·거래대금 | 30 |
-| 60분 EMA60/EMA120 위치 | 25 |
-| 주봉 추세 | 15 |
-| 일봉 추세 | 15 |
+| 60분 EMA60/EMA120 위치 | 20 |
+| 일봉 SMA5/SMA20/SMA60 대표반응 | 20 |
+| 주봉 추세 | 10 |
+| 일봉 추세 지속성 | 5 |
 | 상승각도 | 10 |
 | 최근 5거래일 양봉 수 | 5 |
 
@@ -500,6 +501,33 @@ Hard Block으로 사용하고, 60분 거래량은 최근 20개 완료 봉 평균
 | 추세·위치·거래량이 양호 | 다음 단계 진행 |
 | 점수는 양호하지만 이격·매물대가 불리함 | WATCH |
 | 추세 붕괴·필수 데이터 누락·RR 미달 | REJECT |
+
+### 9.1 일봉 SMA 반응 점수 계약
+
+일봉 위치 점수는 완료된 일봉만 사용하여 SMA5·SMA20·SMA60의 반응을 하나의
+대표반응으로 기록한다. 같은 봉에서 여러 반응이 성립해도 기본 점수는 중복 합산하지
+않으며, 아래 우선순위에서 가장 높은 하나만 채택한다.
+
+| 우선순위 | 대표반응 | 기본 점수 |
+|---:|---|---:|
+| 1 | `SMA60_UPWARD_CROSS_STRONG_BULL` — 전일 종가가 SMA60 이하, 당일 종가가 SMA60 초과이며 강한 양봉 마감 | +10 |
+| 2 | `SMA20_PULLBACK_RECOVERY` — 저가가 SMA20의 0.25 ATR 이내이고 SMA20 위 양봉 마감 | +8 |
+| 3 | `SMA5_RECOVERY` — 전일 종가가 SMA5 아래이고 당일 종가가 SMA5 이상 | +6 |
+| 4 | `SMA5_CLOSE_BREAK` — 전일 종가가 SMA5 이상이고 당일 종가가 SMA5 아래 | -4 |
+| 5 | `NONE` — 위 반응 없음 | 0 |
+
+품질 보너스는 해당 완료 일봉의 반응 품질과 함께 계산하며, 합계의 상한은 항상
+`min(20, 기본 점수 + 품질 보너스)`다. 보너스는 강한 몸통 +3, 고가 부근 마감 +2,
+반응 SMA 상승 기울기 +3, SMA20의 SMA60 상향 골든크로스 +2다. 골든크로스는 독립
+매수 신호나 별도 위치점수 구성요소가 아니며 이 품질 보너스로만 반영한다.
+
+SMA5 이탈은 Hard Block이 아니다. 장중 저가만 SMA5 아래이고 종가가 회복하면 이탈
+감점을 적용하지 않는다. 종가 이탈은 -4점과 WATCH 압력으로 남기고, 다음 완료 일봉이
+SMA5를 회복하면 `SMA5_RECOVERY` +6으로 재평가한다.
+
+평가 시점 `as_of`에는 그 이전에 완료된 일봉만 사용한다. `as_of` 당일 봉, 미완료 봉,
+미래 봉은 SMA·ATR·품질·반응 계산에 사용하지 않는다. 필요한 OHLCV/SMA/ATR 데이터가
+부족하면 반응은 `UNKNOWN`, 점수는 0으로 기록하며 BUY 근거로 대체하지 않는다.
 
 ---
 
@@ -759,12 +787,33 @@ recent_5d_bullish_count
 m60_location_score
 volume_score
 slope_score
+daily_ma_reaction.reaction
+daily_ma_reaction.base_score
+daily_ma_reaction.quality_bonus
+daily_ma_reaction.quality_reasons
+daily_ma_reaction.sma5
+daily_ma_reaction.sma20
+daily_ma_reaction.sma60
+daily_ma_reaction.five_day_state
 minute_ema20_gap_pct
 daily_ema10_gap_pct
+distance_state
+supply_zone_method
+rr_breakdown
 rr
-decision
+final_state
 reason
 ```
+
+`daily_ma_reaction`은 대표반응·기본점수·품질 보너스/근거·SMA값·5일선 상태를
+직렬화한 위치결정 필드다. `volume_score`는 위치 점수의 최대 30점 구성요소이며,
+`distance_state`는 점수 가산이 아니라 과열 Hard Block/WATCH 상태다. `rr_breakdown`은
+현재가·손절가·목표가·기대손실·기대보상·RR과 `supply_zone_method`를 포함할 수 있다.
+
+현 런타임이 산출하지 않는 값(예: 실제 Volume Profile 매물대)은 임의 숫자로 채우지
+않는다. `UNKNOWN`/`null`과 원인 필드로 남기며, 현재 매물대는 `swing_high_proxy_v1`
+같이 실제 사용한 방법이 있을 때만 표시한다. 범용 CLI 기술기준선 보고서는 위치결정
+payload를 받지 않으면 위 세부 필드를 만들어 출력하지 않는다.
 
 예시:
 
@@ -810,7 +859,7 @@ Expected Value
 
 ```text
 LAT SIMPLE v1.0
-= Trend + Volume + 60m Location + 이격도 + Supply Proxy + RR
+= Trend + Volume + 60m Location + Daily SMA Reaction + 이격도 + Supply Proxy + RR
 ```
 
 최종 목적:
