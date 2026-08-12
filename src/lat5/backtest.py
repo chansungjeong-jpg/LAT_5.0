@@ -785,6 +785,7 @@ def run_hourly_pullback_reversal_baseline(
     pullback_count = 0
     reversal_trigger_count = 0
     location_filtered_count = 0
+    location_decisions: list[dict[str, object]] = []
 
     with PaperLedger(output_db) as ledger:
         for item in unique_items:
@@ -872,6 +873,7 @@ def run_hourly_pullback_reversal_baseline(
                 pullback_count += 1
                 confirm_time = pd.Timestamp(hourly.index[setup.pullback_pos]) + pd.Timedelta(hours=1)
 
+                location: dict[str, object] | None = None
                 if location_cfg is not None:
                     ctx = build_context(
                         daily=daily,
@@ -883,6 +885,19 @@ def run_hourly_pullback_reversal_baseline(
                         cutoff=confirm_time,
                     )
                     location = evaluate_watchlist_position(ctx, location_cfg)
+                    location_decisions.append(
+                        {
+                            "symbol": item.ticker,
+                            "name": item.name,
+                            "evaluated_at": str(confirm_time),
+                            "final_state": location["state"],
+                            "location_score": location["location_score"],
+                            "vetoes": list(location.get("vetoes", [])),
+                            "unknown_fields": list(location.get("unknown_fields", [])),
+                            "daily_ma_reaction": location.get("daily_ma_reaction"),
+                            "rr_breakdown": location.get("rr_breakdown"),
+                        }
+                    )
                     if location["state"] not in ("BUY_READY", "WATCH_HIGH"):
                         reason = "LOCATION_FILTERED"
                         reason_counts[reason] += 1
@@ -894,7 +909,11 @@ def run_hourly_pullback_reversal_baseline(
                                 "location_state": location["state"],
                                 "location_score": location["location_score"],
                                 "location_vetoes": location["vetoes"],
+                                "location_unknown_fields": location.get(
+                                    "unknown_fields", []
+                                ),
                                 "location_daily_ma_reaction": location.get("daily_ma_reaction"),
+                                "location_rr_breakdown": location.get("rr_breakdown"),
                             },
                         )
                         continue
@@ -957,6 +976,19 @@ def run_hourly_pullback_reversal_baseline(
                     "final_target_r": 2.0,
                     "entry_cutoff": "14:30",
                 }
+                if location is not None:
+                    inputs.update(
+                        {
+                            "location_state": location["state"],
+                            "location_score": location["location_score"],
+                            "location_vetoes": location.get("vetoes", []),
+                            "location_unknown_fields": location.get(
+                                "unknown_fields", []
+                            ),
+                            "daily_ma_reaction": location.get("daily_ma_reaction"),
+                            "rr_breakdown": location.get("rr_breakdown"),
+                        }
+                    )
                 decision_id = ledger.record_decision(
                     str(entry_time), item.ticker, item.sector, decision, reason,
                     strategy_id, algorithm_version, inputs,
@@ -1019,6 +1051,7 @@ def run_hourly_pullback_reversal_baseline(
         "reversal_trigger_count": reversal_trigger_count,
         "location_gate_enabled": location_cfg is not None,
         "location_filtered_count": location_filtered_count,
+        "location_decisions": location_decisions,
         "reason_counts": dict(reason_counts),
         "partial_target_r": 1.0,
         "final_target_r": 2.0,

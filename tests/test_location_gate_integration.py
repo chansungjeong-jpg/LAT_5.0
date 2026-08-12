@@ -1,3 +1,6 @@
+import json
+import sqlite3
+
 import pandas as pd
 
 from lat5.backtest import BacktestConfig, run_hourly_pullback_reversal_baseline
@@ -105,15 +108,26 @@ def test_runner_allows_candidate_when_location_state_ready(monkeypatch, tmp_path
             "state": "BUY_READY",
             "location_score": 90,
             "vetoes": [],
-            "daily_ma_reaction": {"score": ctx["daily_ma_reaction_score"]},
+            "unknown_fields": [],
+            "daily_ma_reaction": {
+                "reaction": ctx["daily_ma_reaction_state"],
+                "score": ctx["daily_ma_reaction_score"],
+            },
+            "rr_breakdown": {
+                "current_price": 100.0,
+                "stop_price": 95.0,
+                "target_price": 110.0,
+                "rr": 2.0,
+            },
         }
 
     monkeypatch.setattr("lat5.backtest.evaluate_watchlist_position", _ready_location)
 
+    output_db = tmp_path / "paper.db"
     trades, summary, diagnostics = run_hourly_pullback_reversal_baseline(
         Store(),
         [WatchItem("005930", "Samsung", "Semiconductor")],
-        tmp_path / "paper.db",
+        output_db,
         BacktestConfig(commission_bps=0, sell_tax_bps=0, slippage_bps=0),
         start="2026-08-07",
         end="2026-08-07",
@@ -126,6 +140,34 @@ def test_runner_allows_candidate_when_location_state_ready(monkeypatch, tmp_path
     assert len(captured_contexts) == 1
     assert captured_contexts[0]["daily_ma_reaction_state"] == "UNKNOWN"
     assert captured_contexts[0]["daily_ma_reaction_score"] == 0
+    assert diagnostics["location_decisions"] == [
+        {
+            "symbol": "005930",
+            "name": "Samsung",
+            "evaluated_at": str(pd.Timestamp(hourly.index[192]) + pd.Timedelta(hours=1)),
+            "final_state": "BUY_READY",
+            "location_score": 90,
+            "vetoes": [],
+            "unknown_fields": [],
+            "daily_ma_reaction": {"reaction": "UNKNOWN", "score": 0},
+            "rr_breakdown": {
+                "current_price": 100.0,
+                "stop_price": 95.0,
+                "target_price": 110.0,
+                "rr": 2.0,
+            },
+        }
+    ]
+    with sqlite3.connect(output_db) as connection:
+        inputs_json = connection.execute(
+            "SELECT inputs_json FROM decisions WHERE decision = 'BUY'"
+        ).fetchone()[0]
+    decision_inputs = json.loads(inputs_json)
+    assert decision_inputs["daily_ma_reaction"] == {
+        "reaction": "UNKNOWN",
+        "score": 0,
+    }
+    assert decision_inputs["rr_breakdown"]["current_price"] == 100.0
 
 
 def test_runner_default_behavior_unchanged_when_location_cfg_omitted(monkeypatch, tmp_path):

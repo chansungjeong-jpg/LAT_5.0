@@ -163,3 +163,56 @@ def test_hourly_pullback_reversal_report_labels_entry_and_split_exit_rules():
     assert "직전 3개 5분봉 최고가" in report
     assert "1R에서 절반" in report
     assert "14:30" in report
+
+
+def test_hourly_pullback_report_serializes_supplied_location_evidence():
+    daily_reaction = {
+        "reaction": "SMA5_RECOVERY",
+        "base_score": 6,
+        "quality_bonus": 5,
+        "score": 11,
+        "sma5": 101.0,
+        "sma20": 99.0,
+        "sma60": 95.0,
+        "five_day_state": "SMA5_RECOVERY",
+    }
+    rr_breakdown = {
+        "current_price": 103.0,
+        "stop_price": 100.0,
+        "target_price": 109.0,
+        "expected_loss": 3.0,
+        "expected_reward": 6.0,
+        "rr": 2.0,
+        "supply_zone_method": "swing_high_proxy_v1",
+    }
+    report = render_hourly_pullback_reversal_report(
+        summary={
+            "trades": 1, "win_rate": 1.0, "profit_factor": 2.0,
+            "expectancy": 10.0, "net_pnl": 10.0, "return_pct": 0.01,
+            "max_drawdown": 0.0,
+        },
+        diagnostics={
+            "universe_symbols": 1, "minute_covered_symbols": 1,
+            "hourly_covered_symbols": 1, "strong_breakout_count": 1,
+            "pullback_count": 1, "reversal_trigger_count": 1,
+            "reason_counts": {},
+            "location_decisions": [{
+                "symbol": "005930",
+                "name": "Samsung",
+                "evaluated_at": "2026-08-07 12:00:00",
+                "final_state": "BUY_READY",
+                "location_score": 91,
+                "daily_ma_reaction": daily_reaction,
+                "rr_breakdown": rr_breakdown,
+            }],
+        },
+        config=BacktestConfig(), source_db="source.db", start="2026-08-07",
+        end="2026-08-07", ticker="005930",
+    )
+
+    assert "## 위치 판정 근거" in report
+    assert '"reaction": "SMA5_RECOVERY"' in report
+    assert '"sma5": 101.0' in report
+    assert '"current_price": 103.0' in report
+    assert '"supply_zone_method": "swing_high_proxy_v1"' in report
+    assert "volume_score" not in report

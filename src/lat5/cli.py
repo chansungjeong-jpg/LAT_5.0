@@ -74,6 +74,50 @@ def _number(value: object, digits: int = 2) -> str:
     return str(value)
 
 
+def _render_location_decisions(diagnostics: dict[str, object]) -> str:
+    decisions = diagnostics.get("location_decisions")
+    if not isinstance(decisions, list) or not decisions:
+        return ""
+
+    rows: list[str] = []
+    for decision in decisions:
+        if not isinstance(decision, dict):
+            continue
+        daily_reaction = json.dumps(
+            decision.get("daily_ma_reaction"),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        rr_breakdown = json.dumps(
+            decision.get("rr_breakdown"),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        rows.append(
+            "| {symbol} | {name} | {evaluated_at} | {final_state} | {score} | "
+            "`{daily_reaction}` | `{rr_breakdown}` |".format(
+                symbol=decision.get("symbol", "UNKNOWN"),
+                name=decision.get("name", "UNKNOWN"),
+                evaluated_at=decision.get("evaluated_at", "UNKNOWN"),
+                final_state=decision.get("final_state", "UNKNOWN"),
+                score=decision.get("location_score", "UNKNOWN"),
+                daily_reaction=daily_reaction,
+                rr_breakdown=rr_breakdown,
+            )
+        )
+    if not rows:
+        return ""
+    return "\n".join(
+        [
+            "## 위치 판정 근거",
+            "",
+            "| 종목 | 이름 | 평가시각 | 최종 상태 | 위치 점수 | daily_ma_reaction | rr_breakdown |",
+            "|---|---|---|---|---:|---|---|",
+            *rows,
+        ]
+    )
+
+
 def render_report(
     summary: dict[str, object],
     diagnostics: dict[str, object],
@@ -277,6 +321,7 @@ def render_hourly_pullback_reversal_report(
     reason_lines = "\n".join(
         f"| {reason} | {count} |" for reason, count in sorted(reason_counts.items())
     ) or "| 없음 | 0 |"
+    location_section = _render_location_decisions(diagnostics)
     return f"""# LAT 5.0 60분봉 눌림·5분봉 반전 백테스트
 
 ## 확정 조건
@@ -322,6 +367,8 @@ def render_hourly_pullback_reversal_report(
 | 사유 | 건수 |
 |---|---:|
 {reason_lines}
+
+{location_section}
 
 비용 가정: 수수료 {config.commission_bps} bps/side, 매도세금 {config.sell_tax_bps} bps,
 슬리피지 {config.slippage_bps} bps. 체결강도와 외국인 수급의 과거 시계열이 없으므로
