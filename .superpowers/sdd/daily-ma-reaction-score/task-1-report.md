@@ -72,3 +72,37 @@ Full regression:
 python -m pytest -q
 171 passed
 ```
+## Duplicate daily-bar follow-up
+
+- The completed subset must be unique at calendar-day granularity. After excluding the full `as_of` date, any remaining exact duplicate timestamp or multiple timestamps on one date returns `UNKNOWN` with `datetime_index` in `unknown_fields`.
+- A same-day partial bar on the excluded `as_of` date does not trigger the duplicate check because it is outside the completed subset.
+
+### Duplicate-bar verification
+
+RED after adding duplicate-date and duplicate-timestamp tests:
+
+```text
+python -m pytest tests/test_daily_ma_reaction.py -q
+2 failed, 23 passed
+```
+
+GREEN after the minimal duplicate-date guard:
+
+```text
+python -m pytest tests/test_daily_ma_reaction.py -q
+25 passed
+```
+
+Final compile check:
+
+```text
+python -m compileall -q src tests
+exit 0
+```
+
+Final full regression:
+
+```text
+python -m pytest -q
+173 passed
+```

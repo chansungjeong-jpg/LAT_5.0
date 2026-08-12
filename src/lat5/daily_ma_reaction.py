@@ -74,6 +74,8 @@ def _completed_bars(
         completed = daily.loc[
             daily.index.normalize() < evaluation_date.normalize()
         ]
+        if completed.index.normalize().duplicated().any():
+            return None, ("datetime_index",)
     except (TypeError, ValueError):
         return None, ("datetime_index",)
     return completed, ()

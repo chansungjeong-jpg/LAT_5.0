@@ -116,3 +116,27 @@ def test_reaction_fails_closed_for_unsorted_datetime_index():
 
     assert result.status == "UNKNOWN"
     assert "datetime_index" in result.unknown_fields
+
+
+def test_reaction_fails_closed_for_multiple_timestamps_on_one_date():
+    frame = frame_with_bars()
+    same_day = frame.index[-1] + pd.Timedelta(hours=12)
+    frame.loc[same_day] = frame.iloc[-1]
+
+    result = score_daily_ma_reaction(
+        frame, as_of=frame.index[-1] + pd.Timedelta(days=1)
+    )
+
+    assert result.status == "UNKNOWN"
+    assert "datetime_index" in result.unknown_fields
+
+
+def test_reaction_fails_closed_for_duplicate_daily_timestamp():
+    frame = pd.concat([frame_with_bars(), frame_with_bars().iloc[[-1]]])
+
+    result = score_daily_ma_reaction(
+        frame, as_of=frame.index[-1] + pd.Timedelta(days=1)
+    )
+
+    assert result.status == "UNKNOWN"
+    assert "datetime_index" in result.unknown_fields
