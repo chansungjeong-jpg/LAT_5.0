@@ -35,6 +35,23 @@ class BacktestConfig:
     min_rr: float = 1.5
 
 
+def _location_ledger_evidence(location: dict[str, object] | None) -> dict[str, object]:
+    if location is None:
+        return {}
+    daily_ma_reaction = location.get("daily_ma_reaction")
+    rr_breakdown = location.get("rr_breakdown")
+    return {
+        "location_state": location["state"],
+        "location_score": location["location_score"],
+        "location_vetoes": location.get("vetoes", []),
+        "location_unknown_fields": location.get("unknown_fields", []),
+        "daily_ma_reaction": daily_ma_reaction,
+        "rr_breakdown": rr_breakdown,
+        "location_daily_ma_reaction": daily_ma_reaction,
+        "location_rr_breakdown": rr_breakdown,
+    }
+
+
 def infer_tick_size(bars: pd.DataFrame) -> float | None:
     values: list[float] = []
     for column in ("open", "high", "low", "close"):
@@ -905,16 +922,7 @@ def run_hourly_pullback_reversal_baseline(
                         ledger.record_decision(
                             str(confirm_time), item.ticker, item.sector, "REJECT", reason,
                             strategy_id, algorithm_version,
-                            {
-                                "location_state": location["state"],
-                                "location_score": location["location_score"],
-                                "location_vetoes": location["vetoes"],
-                                "location_unknown_fields": location.get(
-                                    "unknown_fields", []
-                                ),
-                                "location_daily_ma_reaction": location.get("daily_ma_reaction"),
-                                "location_rr_breakdown": location.get("rr_breakdown"),
-                            },
+                            _location_ledger_evidence(location),
                         )
                         continue
 
@@ -931,10 +939,15 @@ def run_hourly_pullback_reversal_baseline(
                 if entry_pair is None:
                     reason = "FIVE_MINUTE_REVERSAL_MISSING_OR_INVALIDATED"
                     reason_counts[reason] += 1
+                    inputs = {
+                        "pullback_low": setup.pullback_low,
+                        "ma60": setup.ma60,
+                    }
+                    inputs.update(_location_ledger_evidence(location))
                     ledger.record_decision(
                         str(confirm_time), item.ticker, item.sector, "REJECT", reason,
                         strategy_id, algorithm_version,
-                        {"pullback_low": setup.pullback_low, "ma60": setup.ma60},
+                        inputs,
                     )
                     continue
 
@@ -977,18 +990,7 @@ def run_hourly_pullback_reversal_baseline(
                     "entry_cutoff": "14:30",
                 }
                 if location is not None:
-                    inputs.update(
-                        {
-                            "location_state": location["state"],
-                            "location_score": location["location_score"],
-                            "location_vetoes": location.get("vetoes", []),
-                            "location_unknown_fields": location.get(
-                                "unknown_fields", []
-                            ),
-                            "daily_ma_reaction": location.get("daily_ma_reaction"),
-                            "rr_breakdown": location.get("rr_breakdown"),
-                        }
-                    )
+                    inputs.update(_location_ledger_evidence(location))
                 decision_id = ledger.record_decision(
                     str(entry_time), item.ticker, item.sector, decision, reason,
                     strategy_id, algorithm_version, inputs,

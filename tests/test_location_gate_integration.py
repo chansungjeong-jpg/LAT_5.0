@@ -170,6 +170,63 @@ def test_runner_allows_candidate_when_location_state_ready(monkeypatch, tmp_path
     assert decision_inputs["rr_breakdown"]["current_price"] == 100.0
 
 
+def test_five_minute_reversal_reject_keeps_location_reaction_and_rr_evidence(
+    monkeypatch, tmp_path
+):
+    hourly, minutes = _hourly_and_minutes()
+
+    class Store:
+        def load_minutes(self, ticker):
+            return minutes
+
+        def load_daily(self, ticker):
+            return _empty_daily()
+
+    _apply_common_monkeypatches(monkeypatch, hourly)
+    monkeypatch.setattr(
+        "lat5.backtest.find_five_minute_reversal_entry",
+        lambda bars, start_time, pullback_low: None,
+    )
+    daily_reaction = {"reaction": "SMA5_RECOVERY", "score": 6}
+    rr_breakdown = {
+        "current_price": 100.0,
+        "stop_price": 95.0,
+        "target_price": 110.0,
+        "rr": 2.0,
+    }
+    monkeypatch.setattr(
+        "lat5.backtest.evaluate_watchlist_position",
+        lambda ctx, cfg: {
+            "state": "BUY_READY",
+            "location_score": 86,
+            "vetoes": [],
+            "unknown_fields": [],
+            "daily_ma_reaction": daily_reaction,
+            "rr_breakdown": rr_breakdown,
+        },
+    )
+
+    output_db = tmp_path / "paper.db"
+    run_hourly_pullback_reversal_baseline(
+        Store(),
+        [WatchItem("005930", "Samsung", "Semiconductor")],
+        output_db,
+        BacktestConfig(commission_bps=0, sell_tax_bps=0, slippage_bps=0),
+        start="2026-08-07",
+        end="2026-08-07",
+        location_cfg=LocationScoreConfig(),
+    )
+
+    with sqlite3.connect(output_db) as connection:
+        inputs_json = connection.execute(
+            "SELECT inputs_json FROM decisions "
+            "WHERE reason = 'FIVE_MINUTE_REVERSAL_MISSING_OR_INVALIDATED'"
+        ).fetchone()[0]
+    decision_inputs = json.loads(inputs_json)
+    assert decision_inputs["daily_ma_reaction"] == daily_reaction
+    assert decision_inputs["rr_breakdown"] == rr_breakdown
+
+
 def test_runner_default_behavior_unchanged_when_location_cfg_omitted(monkeypatch, tmp_path):
     hourly, minutes = _hourly_and_minutes()
 

@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
+from lat5.data import aggregate_weekly
 from lat5.daily_ma_reaction import score_daily_reaction
 from lat5.hourly_abc_support import find_five_minute_reversal_entry, find_hourly_ma60_pullback, strong_hourly_breakout_at
 from lat5.location_score import evaluate_daily_ma_reaction_gate
@@ -114,6 +115,26 @@ def build_context(
         }
     )
 
+    completed_weekly = aggregate_weekly(prior_daily)
+    if not completed_weekly.empty:
+        completed_weekly = completed_weekly.loc[completed_weekly.index < as_of]
+        weekly_close = completed_weekly["close"].astype(float)
+        weekly_ema10 = weekly_close.ewm(
+            span=10, adjust=False, min_periods=10
+        ).mean()
+        weekly_ema20 = weekly_close.ewm(
+            span=20, adjust=False, min_periods=20
+        ).mean()
+        if (
+            not weekly_close.empty
+            and not pd.isna(weekly_ema10.iloc[-1])
+            and not pd.isna(weekly_ema20.iloc[-1])
+        ):
+            ctx["weekly_trend_ok"] = bool(
+                weekly_close.iloc[-1] >= weekly_ema20.iloc[-1]
+                and weekly_ema10.iloc[-1] >= weekly_ema20.iloc[-1]
+            )
+
     if price is not None and as_of in daily_ema.index:
         ema_row = daily_ema.loc[as_of]
         if not (pd.isna(ema_row["ema10"]) or pd.isna(ema_row["ema20"])):
@@ -137,6 +158,19 @@ def build_context(
             ctx["m60_trend_ok"] = (
                 float(last["close"]) >= float(last["ema60"]) >= float(last["ema120"])
             )
+    if len(prior_hourly) >= 2:
+        previous_ema60 = prior_hourly.iloc[-2].get("ema60")
+        current_ema60 = prior_hourly.iloc[-1].get("ema60")
+        if (
+            previous_ema60 is not None
+            and current_ema60 is not None
+            and not pd.isna(previous_ema60)
+            and not pd.isna(current_ema60)
+            and float(previous_ema60) != 0
+        ):
+            ctx["m60_slope_pct"] = (
+                float(current_ema60) - float(previous_ema60)
+            ) / float(previous_ema60)
 
     breakout_pos = None
     search_start = max(0, len(prior_hourly) - breakout_lookback_bars)
@@ -200,7 +234,6 @@ def evaluate_watchlist_position(ctx: dict, cfg: LocationScoreConfig) -> dict:
     veto rationale (v1 spec allowed a no-pullback chase, RR<1.5, and an
     overheated entry to all reach BUY_READY on score alone).
     """
-    score = 0
     reasons: list[str] = []
     wait_for: list[str] = []
     vetoes: list[str] = []
@@ -238,10 +271,8 @@ def evaluate_watchlist_position(ctx: dict, cfg: LocationScoreConfig) -> dict:
         }
     if sector_score is not None:
         if sector_score >= cfg.sector_strong_score:
-            score += 15
             reasons.append("섹터 돈흐름 강함")
         elif sector_score >= cfg.sector_min_score:
-            score += 10
             reasons.append("섹터 돈흐름 보통 이상")
 
     reaction_payload = ctx.get("daily_ma_reaction")
@@ -259,12 +290,10 @@ def evaluate_watchlist_position(ctx: dict, cfg: LocationScoreConfig) -> dict:
     vetoes.extend(daily_reaction_gate.vetoes)
 
     if ctx.get("daily_trend_ok"):
-        score += 5
         reasons.append("일봉 추세 양호")
     else:
         wait_for.append("일봉 10EMA 회복")
     if ctx.get("m60_trend_ok"):
-        score += 5
         reasons.append("60분 추세 회복")
     else:
         wait_for.append("60분 추세 회복")
@@ -272,13 +301,10 @@ def evaluate_watchlist_position(ctx: dict, cfg: LocationScoreConfig) -> dict:
     bull10 = ctx.get("daily_bull_count_10")
     if bull5 is not None and bull10 is not None:
         if bull5 >= cfg.strong_5_days_bullish and bull10 >= cfg.strong_10_days_bullish:
-            score += 5
             reasons.append("일봉 양봉 개수 우수")
         elif bull5 >= cfg.recent_5_days_min_bullish and bull10 >= cfg.recent_10_days_min_bullish:
-            score += 3
             reasons.append("일봉 양봉 개수 기준 통과")
         elif bull5 >= cfg.weak_5_days_bullish or bull10 >= cfg.weak_10_days_bullish:
-            score += 1
             reasons.append("일봉 양봉 개수 약함")
             wait_for.append("일봉 양봉 개수 회복")
         else:
@@ -287,26 +313,20 @@ def evaluate_watchlist_position(ctx: dict, cfg: LocationScoreConfig) -> dict:
         wait_for.append("일봉 양봉 개수 회복")
 
     if ctx.get("anchor_volume_ok"):
-        score += 8
         reasons.append("기준봉 거래량 증가")
     if ctx.get("pullback_volume_dry"):
-        score += 6
         reasons.append("눌림 거래량 감소")
     if ctx.get("breakout_volume_ok"):
-        score += 7
         reasons.append("돌파 거래량 증가")
     else:
         wait_for.append("돌파 거래량 증가 확인")
     if ctx.get("bullish_candle_strength_ok"):
-        score += 4
         reasons.append("양봉 지속성 양호")
 
     pullback_state = _get("pullback_state")
     if pullback_state == "near_ema20":
-        score += 20
         reasons.append("20EMA 부근 눌림 위치")
     elif pullback_state == "in_progress":
-        score += 10
         reasons.append("눌림 진행 중")
         wait_for.append("20EMA 지지 확인")
     else:
@@ -316,10 +336,8 @@ def evaluate_watchlist_position(ctx: dict, cfg: LocationScoreConfig) -> dict:
     m5_dist = ctx.get("m5_ema20_distance_pct", 999)
     daily_dist = ctx.get("daily_ema10_distance_pct", 999)
     if m5_dist <= cfg.m5_ema20_max_pct and daily_dist <= cfg.daily_ema10_max_pct:
-        score += 15
         reasons.append("이격도 정상")
     elif m5_dist <= cfg.m5_ema20_warning_pct and daily_dist <= cfg.daily_ema10_warning_pct:
-        score += 7
         reasons.append("이격도 약간 부담")
         wait_for.append("이격도 축소")
     else:
@@ -329,16 +347,53 @@ def evaluate_watchlist_position(ctx: dict, cfg: LocationScoreConfig) -> dict:
     rr = _get("rr") or 0
     overhead_supply_close = ctx.get("overhead_supply_close", True)
     if rr >= cfg.good_rr and not overhead_supply_close:
-        score += 10
         reasons.append("손익비 우수")
     elif rr >= cfg.min_rr:
-        score += 6
         reasons.append("손익비 최소 기준 통과")
     else:
         wait_for.append("손익비 1.5 이상 자리 대기")
         vetoes.append("RR_TOO_LOW")
 
-    score = max(0, min(100, score + daily_reaction_gate.component))
+    slope_pct = ctx.get("m60_slope_pct")
+    if slope_pct is None:
+        unknown_fields.append("m60_slope_pct")
+        slope_score = 0
+    elif float(slope_pct) <= 0:
+        slope_score = 0
+    elif float(slope_pct) < 0.005:
+        slope_score = 5
+    else:
+        slope_score = 10
+
+    if ctx.get("weekly_trend_ok") is None:
+        unknown_fields.append("weekly_trend_ok")
+
+    if bull5 is None:
+        recent_bullish_score = 0
+    elif bull5 >= cfg.strong_5_days_bullish:
+        recent_bullish_score = 5
+    elif bull5 >= cfg.weak_5_days_bullish:
+        recent_bullish_score = 3
+    else:
+        recent_bullish_score = 0
+
+    score_components = {
+        "volume": 10 * sum(
+            bool(ctx.get(field))
+            for field in (
+                "anchor_volume_ok",
+                "pullback_volume_dry",
+                "breakout_volume_ok",
+            )
+        ),
+        "m60_location": 20 if ctx.get("m60_trend_ok") else 0,
+        "daily_ma_reaction": daily_reaction_gate.component,
+        "weekly_trend": 10 if ctx.get("weekly_trend_ok") else 0,
+        "slope": slope_score,
+        "recent_5d_bullish": recent_bullish_score,
+        "daily_trend_persistence": 5 if ctx.get("daily_trend_ok") else 0,
+    }
+    score = sum(score_components.values())
     if daily_reaction_gate.component > 0:
         reasons.append("일봉 이평선 반응 점수 반영")
     if "DAILY_MA_WATCH_PRESSURE" in daily_reaction_gate.vetoes:
@@ -393,6 +448,7 @@ def evaluate_watchlist_position(ctx: dict, cfg: LocationScoreConfig) -> dict:
     return {
         "state": state,
         "location_score": score,
+        "score_components": score_components,
         "vetoes": vetoes,
         "reasons": reasons,
         "wait_for": wait_for,

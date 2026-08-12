@@ -10,7 +10,9 @@ def _full_pass_ctx() -> dict:
         "watchlist_ok": True,
         "sector_score": 75,
         "daily_trend_ok": True,
+        "weekly_trend_ok": True,
         "m60_trend_ok": True,
+        "m60_slope_pct": 0.01,
         "daily_bull_count_5": 5,
         "daily_bull_count_10": 10,
         "anchor_volume_ok": True,
@@ -40,8 +42,20 @@ def test_not_on_watchlist_forces_ignore():
 
 
 def test_full_pass_reaches_buy_ready_with_max_score():
-    result = evaluate_watchlist_position(_full_pass_ctx(), LocationScoreConfig())
+    ctx = _full_pass_ctx()
+    ctx["daily_ma_reaction_score"] = 20
+    ctx["daily_ma_reaction_state"] = "SMA60_UPWARD_CROSS_STRONG_BULL"
+    result = evaluate_watchlist_position(ctx, LocationScoreConfig())
     assert result["location_score"] == 100
+    assert result["score_components"] == {
+        "volume": 30,
+        "m60_location": 20,
+        "daily_ma_reaction": 20,
+        "weekly_trend": 10,
+        "slope": 10,
+        "recent_5d_bullish": 5,
+        "daily_trend_persistence": 5,
+    }
     assert result["state"] == "BUY_READY"
     assert result["vetoes"] == []
 
@@ -100,7 +114,9 @@ def test_score_in_watch_high_band():
         "watchlist_ok": True,
         "sector_score": None,
         "daily_trend_ok": True,
+        "weekly_trend_ok": True,
         "m60_trend_ok": True,
+        "m60_slope_pct": 0.01,
         "daily_bull_count_5": 5,
         "daily_bull_count_10": 10,
         "anchor_volume_ok": True,
@@ -116,7 +132,7 @@ def test_score_in_watch_high_band():
         "daily_ma_reaction_state": "NONE",
     }
     result = evaluate_watchlist_position(ctx, LocationScoreConfig())
-    assert result["location_score"] == 65
+    assert result["location_score"] == 70
     assert result["state"] == "WATCH_HIGH"
 
 
@@ -125,7 +141,9 @@ def test_score_in_watch_band():
         "watchlist_ok": True,
         "sector_score": None,
         "daily_trend_ok": True,
+        "weekly_trend_ok": True,
         "m60_trend_ok": False,
+        "m60_slope_pct": 0.01,
         "daily_bull_count_5": 0,
         "daily_bull_count_10": 0,
         "anchor_volume_ok": True,
@@ -141,7 +159,7 @@ def test_score_in_watch_band():
         "daily_ma_reaction_state": "NONE",
     }
     result = evaluate_watchlist_position(ctx, LocationScoreConfig())
-    assert result["location_score"] == 42
+    assert result["location_score"] == 45
     assert result["state"] == "WATCH"
 
 
@@ -150,7 +168,9 @@ def test_low_score_without_veto_is_ignore():
         "watchlist_ok": True,
         "sector_score": None,
         "daily_trend_ok": False,
+        "weekly_trend_ok": False,
         "m60_trend_ok": False,
+        "m60_slope_pct": 0.0,
         "daily_bull_count_5": 0,
         "daily_bull_count_10": 0,
         "anchor_volume_ok": False,
@@ -166,7 +186,7 @@ def test_low_score_without_veto_is_ignore():
         "daily_ma_reaction_state": "NONE",
     }
     result = evaluate_watchlist_position(ctx, LocationScoreConfig())
-    assert result["location_score"] == 23
+    assert result["location_score"] == 0
     assert result["state"] == "IGNORE"
     assert result["vetoes"] == []
 
@@ -174,24 +194,24 @@ def test_low_score_without_veto_is_ignore():
 def test_daily_bull_count_is_graduated_not_binary():
     top = _full_pass_ctx()
     top["daily_bull_count_5"], top["daily_bull_count_10"] = 4, 8
-    assert evaluate_watchlist_position(top, LocationScoreConfig())["location_score"] == 100
+    assert evaluate_watchlist_position(top, LocationScoreConfig())["location_score"] == 80
 
     passing = _full_pass_ctx()
     passing["daily_bull_count_5"], passing["daily_bull_count_10"] = 3, 5
     result = evaluate_watchlist_position(passing, LocationScoreConfig())
-    assert result["location_score"] == 98  # 2pt below max: pass tier (3pt) vs top tier (5pt)
+    assert result["location_score"] == 78  # 2pt below max: pass tier (3pt) vs top tier (5pt)
     assert "일봉 양봉 개수 기준 통과" in result["reasons"]
 
     weak = _full_pass_ctx()
     weak["daily_bull_count_5"], weak["daily_bull_count_10"] = 2, 4
     result = evaluate_watchlist_position(weak, LocationScoreConfig())
-    assert result["location_score"] == 96  # 4pt below max: weak tier (1pt) vs top tier (5pt)
+    assert result["location_score"] == 78  # SSOT scorer gives two bullish days 3/5 points
     assert "일봉 양봉 개수 회복" in result["wait_for"]
 
     zero = _full_pass_ctx()
     zero["daily_bull_count_5"], zero["daily_bull_count_10"] = 1, 2
     result = evaluate_watchlist_position(zero, LocationScoreConfig())
-    assert result["location_score"] == 95  # full 5pt lost
+    assert result["location_score"] == 75  # full 5pt lost
 
 
 def test_no_pullback_caps_buy_ready_to_watch():
@@ -209,7 +229,7 @@ def test_rr_below_minimum_forces_ignore_even_at_high_score():
     ctx = _full_pass_ctx()
     ctx["rr"] = 1.2
     result = evaluate_watchlist_position(ctx, LocationScoreConfig())
-    assert result["location_score"] == 90
+    assert result["location_score"] == 80
     assert "RR_TOO_LOW" in result["vetoes"]
     assert result["state"] == "IGNORE"
 
@@ -220,7 +240,7 @@ def test_overheated_distance_caps_buy_ready_to_watch():
     ctx["m5_ema20_distance_pct"] = 0.10
     ctx["daily_ema10_distance_pct"] = 0.20
     result = evaluate_watchlist_position(ctx, LocationScoreConfig())
-    assert result["location_score"] == 85
+    assert result["location_score"] == 80
     assert "OVERHEATED" in result["vetoes"]
     assert result["state"] == "WATCH"
 
@@ -262,25 +282,29 @@ def test_reasons_and_wait_for_are_populated():
 
 
 @pytest.mark.parametrize(
-    ("reaction", "reaction_score"),
-    [("SMA5_HOLD", 3), ("SMA5_RECOVERY", 6)],
+    ("reaction", "reaction_score", "expected_score"),
+    [
+        ("NONE", 0, 80),
+        ("SMA5_HOLD", 3, 83),
+        ("SMA5_RECOVERY", 6, 86),
+        ("SMA60_UPWARD_CROSS_STRONG_BULL", 20, 100),
+    ],
 )
-def test_positive_daily_reactions_raise_the_actual_location_score(
-    reaction: str, reaction_score: int
+def test_daily_reactions_use_the_actual_ssot_twenty_point_component(
+    reaction: str, reaction_score: int, expected_score: int
 ):
     ctx = _full_pass_ctx()
-    ctx["anchor_volume_ok"] = False
     ctx["daily_ma_reaction_state"] = reaction
     ctx["daily_ma_reaction_score"] = reaction_score
 
     result = evaluate_watchlist_position(ctx, LocationScoreConfig())
 
-    assert result["location_score"] == 92 + reaction_score
+    assert result["location_score"] == expected_score
+    assert result["location_score"] <= 100
 
 
 def test_strong_daily_reaction_can_promote_watch_high_to_buy_ready():
     ctx = _full_pass_ctx()
-    ctx["anchor_volume_ok"] = False
     ctx["pullback_volume_dry"] = False
     ctx["breakout_volume_ok"] = False
     ctx["bullish_candle_strength_ok"] = False
@@ -289,7 +313,7 @@ def test_strong_daily_reaction_can_promote_watch_high_to_buy_ready():
 
     result = evaluate_watchlist_position(ctx, LocationScoreConfig())
 
-    assert result["location_score"] == 95
+    assert result["location_score"] == 80
     assert result["state"] == "BUY_READY"
 
 
@@ -300,7 +324,7 @@ def test_sma5_close_break_deducts_score_and_applies_watch_pressure():
 
     result = evaluate_watchlist_position(ctx, LocationScoreConfig())
 
-    assert result["location_score"] == 96
+    assert result["location_score"] == 76
     assert result["state"] == "WATCH"
     assert "DAILY_MA_WATCH_PRESSURE" in result["vetoes"]
 

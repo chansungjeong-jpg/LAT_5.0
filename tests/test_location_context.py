@@ -266,6 +266,49 @@ def test_m60_trend_ok_only_uses_bars_completed_before_session_open():
     assert ctx["m60_trend_ok"] is True
 
 
+def test_build_context_exposes_completed_weekly_trend_and_normalized_m60_slope():
+    daily_index = pd.bdate_range("2026-01-02", periods=140)
+    closes = [100.0 + pos for pos in range(len(daily_index))]
+    daily = pd.DataFrame(
+        {
+            "open": [close - 1.0 for close in closes],
+            "high": [close + 1.0 for close in closes],
+            "low": [close - 2.0 for close in closes],
+            "close": closes,
+            "volume": [1_000.0] * len(closes),
+            "amount": [close * 1_000.0 for close in closes],
+        },
+        index=daily_index,
+    )
+    as_of = daily_index[-1] + pd.Timedelta(days=1)
+    hourly = pd.DataFrame(
+        {
+            "open": [100.0, 101.0],
+            "high": [102.0, 103.0],
+            "low": [99.0, 100.0],
+            "close": [101.0, 102.0],
+            "volume": [100.0, 100.0],
+            "ema60": [100.0, 101.0],
+            "ema120": [95.0, 96.0],
+        },
+        index=pd.DatetimeIndex(
+            [as_of - pd.Timedelta(hours=3), as_of - pd.Timedelta(hours=2)]
+        ),
+    )
+
+    ctx = build_context(
+        daily=daily,
+        daily_ema=daily_ema_context(daily),
+        hourly=hourly,
+        minutes=_empty(["open", "high", "low", "close", "volume", "ema20_5m"]),
+        as_of=as_of,
+        cfg=LocationScoreConfig(),
+    )
+
+    assert ctx["weekly_trend_ok"] is True
+    assert ctx["m60_slope_pct"] == pytest.approx(0.01)
+
+
 def _breakout_hourly(periods: int = 30, start: str = "2026-08-01 09:00") -> pd.DataFrame:
     index = pd.date_range(start, periods=periods, freq="h")
     open_ = [100.0] * periods
