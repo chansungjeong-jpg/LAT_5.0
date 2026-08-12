@@ -57,3 +57,32 @@ clean
 ## 커밋
 
 `feat: add daily ma reaction quality bonuses`
+
+## 리뷰 MAJOR 수정
+
+리뷰에서 지적된 SMA60 반응 조건 누락을 수정했다. 이제
+`SMA60_UPWARD_CROSS_STRONG_BULL`과 기본점수 `+10`은 다음 조건을 모두
+만족할 때만 부여된다.
+
+1. 전일 종가가 SMA60 이하
+2. 당일 종가가 SMA60 초과
+3. 당일 bullish close
+4. 당일 body의 ATR 정규화 비율 `>= 0.8`
+5. 당일 body가 최근 20개 완료 body의 `p80` 이상
+
+ATR 또는 최근 20개 body percentile 조건이 부족한 SMA60 관통 양봉에 대한
+public API 회귀 테스트를 추가했다. 해당 케이스는 더 이상
+`SMA60_UPWARD_CROSS_STRONG_BULL` 또는 `base_score=10`을 반환하지 않는다.
+
+수정 후 재검증:
+
+```text
+python -m pytest tests/test_daily_ma_reaction.py -q
+49 passed
+
+python -m pytest -q
+195 passed
+
+python -m compileall -q src tests
+exit 0
+```

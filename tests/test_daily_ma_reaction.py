@@ -66,6 +66,36 @@ def test_sma60_current_close_equal_to_sma60_is_not_an_upward_cross():
     assert result.base_score == 0
 
 
+@pytest.mark.parametrize(
+    ("open_price", "close", "expected_reason"),
+    [
+        (102.5, 103.0, "atr_body_ratio_below_0_8"),
+        (101.0, 102.0, "recent_body_percentile_below_p80"),
+    ],
+    ids=("weak_atr_body", "weak_recent_body_percentile"),
+)
+def test_sma60_bullish_cross_without_strong_body_is_not_strong_bull(
+    open_price: float, close: float, expected_reason: str
+):
+    frame = frame_with_bars(61)
+    frame.loc[:, "close"] = 100.0
+    frame.loc[:, "open"] = 99.0
+    frame.loc[:, "high"] = 101.0
+    frame.loc[:, "low"] = 98.0
+    last = frame.index[-1]
+    frame.loc[last, ["open", "high", "low", "close"]] = [
+        open_price,
+        104.0,
+        99.0,
+        close,
+    ]
+
+    result = score_daily_reaction(frame, as_of=last + pd.Timedelta(days=1))
+
+    assert result.reaction != "SMA60_UPWARD_CROSS_STRONG_BULL", expected_reason
+    assert result.base_score != 10
+
+
 def twenty_pullback_fixture() -> tuple[pd.DataFrame, pd.Timestamp]:
     frame = frame_with_bars(61)
     last = frame.index[-1]

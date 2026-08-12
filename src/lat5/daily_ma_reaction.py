@@ -90,20 +90,7 @@ def _quality_bonus(
     sma20_series: pd.Series,
     sma60_series: pd.Series,
 ) -> tuple[int, dict[str, int], tuple[str, ...], str]:
-    bodies = (validated["close"] - validated["open"]).abs()
-    atr14 = _atr_series(validated).iloc[-1]
-    body_ratio = (
-        float(bodies.iloc[-1] / atr14)
-        if pd.notna(atr14) and atr14 > 0
-        else 0.0
-    )
-    recent_bodies = bodies.tail(20)
-    strong_body = (
-        len(recent_bodies) == 20
-        and body_ratio >= 0.8
-        and bodies.iloc[-1] >= float(recent_bodies.quantile(0.8))
-        and validated["close"].iloc[-1] > validated["open"].iloc[-1]
-    )
+    strong_body = _strong_body(validated)
     current_high = float(validated["high"].iloc[-1])
     current_low = float(validated["low"].iloc[-1])
     current_close = float(validated["close"].iloc[-1])
@@ -150,6 +137,24 @@ def _quality_bonus(
         reasons,
         "body_atr_ratio_and_recent_20_body_p80",
     )
+
+
+def _strong_body(validated: pd.DataFrame) -> bool:
+    bodies = (validated["close"] - validated["open"]).abs()
+    atr14 = _atr_series(validated).iloc[-1]
+    body_ratio = (
+        float(bodies.iloc[-1] / atr14)
+        if pd.notna(atr14) and atr14 > 0
+        else 0.0
+    )
+    recent_bodies = bodies.tail(20)
+    strong_body = (
+        len(recent_bodies) == 20
+        and body_ratio >= 0.8
+        and bodies.iloc[-1] >= float(recent_bodies.quantile(0.8))
+        and validated["close"].iloc[-1] > validated["open"].iloc[-1]
+    )
+    return strong_body
 
 
 def _completed_bars(
@@ -248,10 +253,12 @@ def score_daily_ma_reaction(
     current_sma60 = float(sma60_series.iloc[-1])
     current_sma20 = float(sma20)
     current_open = float(validated["open"].iloc[-1])
+    strong_body = _strong_body(validated)
     if (
         previous_close <= previous_sma60
         and current_close > current_sma60
         and current_close > current_open
+        and strong_body
     ):
         reaction = "SMA60_UPWARD_CROSS_STRONG_BULL"
         base_score = 10
