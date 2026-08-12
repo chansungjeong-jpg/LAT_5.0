@@ -43,6 +43,29 @@ def test_sixty_sma_upward_cross_with_strong_bullish_bar_scores_ten():
     assert result.base_score == 10
 
 
+def test_sma60_cross_accepts_previous_close_equal_to_previous_sma60():
+    frame, as_of = sixty_cross_fixture()
+
+    result = score_daily_reaction(frame, as_of=as_of)
+
+    assert result.reaction == "SMA60_UPWARD_CROSS_STRONG_BULL"
+    assert result.base_score == 10
+
+
+def test_sma60_current_close_equal_to_sma60_is_not_an_upward_cross():
+    frame = frame_with_bars(61)
+    frame.loc[:, "close"] = 100.0
+    frame.loc[:, "open"] = 99.0
+    frame.loc[:, "high"] = 101.0
+    frame.loc[:, "low"] = 98.0
+    last = frame.index[-1]
+
+    result = score_daily_reaction(frame, as_of=last + pd.Timedelta(days=1))
+
+    assert result.reaction == "NONE"
+    assert result.base_score == 0
+
+
 def twenty_pullback_fixture() -> tuple[pd.DataFrame, pd.Timestamp]:
     frame = frame_with_bars(61)
     last = frame.index[-1]
@@ -59,6 +82,37 @@ def test_twenty_sma_pullback_recovery_scores_eight():
     assert result.base_score == 8
 
 
+def twenty_pullback_boundary_fixture(low_offset: float = 0.0) -> tuple[pd.DataFrame, pd.Timestamp]:
+    frame = frame_with_bars(61)
+    frame.loc[:, "close"] = 100.0
+    frame.loc[:, "open"] = 99.0
+    frame.loc[:, "high"] = 101.0
+    frame.loc[:, "low"] = 98.0
+    previous = frame.index[-2]
+    last = frame.index[-1]
+    frame.loc[previous, ["open", "high", "low", "close"]] = [99.5, 101.5, 98.5, 100.5]
+    frame.loc[last, ["open", "high", "low", "close"]] = [100.5, 102.0, 100.798214285714 + low_offset, 101.0]
+    return frame, last + pd.Timedelta(days=1)
+
+
+def test_sma20_pullback_accepts_exactly_quarter_atr_low_distance():
+    frame, as_of = twenty_pullback_boundary_fixture()
+
+    result = score_daily_reaction(frame, as_of=as_of)
+
+    assert result.reaction == "SMA20_PULLBACK_RECOVERY"
+    assert result.base_score == 8
+
+
+def test_sma20_pullback_rejects_low_just_outside_quarter_atr_distance():
+    frame, as_of = twenty_pullback_boundary_fixture(low_offset=1e-6)
+
+    result = score_daily_reaction(frame, as_of=as_of)
+
+    assert result.reaction == "NONE"
+    assert result.base_score == 0
+
+
 def five_recovery_fixture() -> tuple[pd.DataFrame, pd.Timestamp]:
     frame = frame_with_bars(70)
     previous = frame.index[-2]
@@ -70,6 +124,28 @@ def five_recovery_fixture() -> tuple[pd.DataFrame, pd.Timestamp]:
 
 def test_five_sma_break_then_next_day_recovery_scores_six():
     frame, as_of = five_recovery_fixture()
+
+    result = score_daily_reaction(frame, as_of=as_of)
+
+    assert result.reaction == "SMA5_RECOVERY"
+    assert result.base_score == 6
+
+
+def five_recovery_equal_fixture() -> tuple[pd.DataFrame, pd.Timestamp]:
+    frame = frame_with_bars(61)
+    frame.loc[:, "close"] = 100.0
+    frame.loc[:, "open"] = 99.0
+    frame.loc[:, "high"] = 101.0
+    frame.loc[:, "low"] = 98.0
+    previous = frame.index[-2]
+    last = frame.index[-1]
+    frame.loc[previous, "close"] = 99.0
+    frame.loc[last, ["open", "high", "low", "close"]] = [99.0, 100.5, 98.5, 99.75]
+    return frame, last + pd.Timedelta(days=1)
+
+
+def test_sma5_recovery_accepts_current_close_equal_to_sma5():
+    frame, as_of = five_recovery_equal_fixture()
 
     result = score_daily_reaction(frame, as_of=as_of)
 
@@ -91,6 +167,48 @@ def test_five_sma_close_break_is_deduction_not_unknown_or_hard_reject():
 
     assert result.reaction == "SMA5_CLOSE_BREAK"
     assert result.base_score == -4
+
+
+def five_break_equal_fixture() -> tuple[pd.DataFrame, pd.Timestamp]:
+    frame = frame_with_bars(61)
+    frame.loc[:, "close"] = 100.0
+    frame.loc[:, "open"] = 99.0
+    frame.loc[:, "high"] = 101.0
+    frame.loc[:, "low"] = 98.0
+    last = frame.index[-1]
+    frame.loc[last, ["open", "high", "low", "close"]] = [100.0, 101.0, 98.0, 99.0]
+    return frame, last + pd.Timedelta(days=1)
+
+
+def test_sma5_break_accepts_previous_close_equal_to_previous_sma5():
+    frame, as_of = five_break_equal_fixture()
+
+    result = score_daily_reaction(frame, as_of=as_of)
+
+    assert result.reaction == "SMA5_CLOSE_BREAK"
+    assert result.base_score == -4
+
+
+@pytest.mark.parametrize(
+    ("previous_close", "current_close"),
+    [(100.5, 101.0), (99.0, 99.0)],
+    ids=("above_sma5", "below_sma5"),
+)
+def test_sma5_same_side_maintain_returns_none(previous_close: float, current_close: float):
+    frame = frame_with_bars(61)
+    frame.loc[:, "close"] = 100.0
+    frame.loc[:, "open"] = 99.0
+    frame.loc[:, "high"] = 101.0
+    frame.loc[:, "low"] = 98.0
+    previous = frame.index[-2]
+    last = frame.index[-1]
+    frame.loc[previous, "close"] = previous_close
+    frame.loc[last, ["open", "high", "low", "close"]] = [current_close - 1.0, current_close + 1.0, current_close - 2.0, current_close]
+
+    result = score_daily_reaction(frame, as_of=last + pd.Timedelta(days=1))
+
+    assert result.reaction == "NONE"
+    assert result.base_score == 0
 
 
 def overlapping_fixture() -> tuple[pd.DataFrame, pd.Timestamp]:

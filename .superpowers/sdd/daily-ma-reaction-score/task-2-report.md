@@ -30,3 +30,13 @@
 ## 잔여 범위
 
 Task 3 이후 범위인 ATR 기반 candle quality bonus, golden-cross bonus, location scorer/context/report 연동은 다음 Task로 남겼습니다.
+
+## Review follow-up — MINOR boundary coverage
+
+- Added public-API regression tests for the SMA60 previous-close equality boundary and current-close equality rejection.
+- Added SMA20 pullback tests for exact `0.25 ATR` acceptance and just-outside rejection.
+- Added SMA5 tests for recovery at current-close equality, break at previous-close equality, and above/below same-side maintain returning `NONE`.
+- Production implementation was not changed; only `tests/test_daily_ma_reaction.py` and this report were updated.
+- Focused: `python -m pytest tests/test_daily_ma_reaction.py -q` → `39 passed`
+- Full suite: `python -m pytest -q` → `187 passed`
+- Compile: `python -m compileall -q src tests` → success
