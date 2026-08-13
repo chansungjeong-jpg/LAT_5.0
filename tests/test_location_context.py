@@ -50,9 +50,6 @@ def test_build_context_with_no_data_returns_safe_defaults():
             "sma20": None,
             "sma60": None,
             "rsi14": None,
-            "rsi_state": "UNKNOWN",
-            "rsi_bonus": 0,
-            "rsi_reasons": [],
             "five_day_state": "UNKNOWN",
         },
         "pullback_state": "none",
@@ -114,9 +111,6 @@ def test_build_context_serializes_completed_daily_ma_reaction_only():
     assert ctx["daily_ma_reaction"]["base_score"] == expected.base_score
     assert ctx["daily_ma_reaction"]["quality_reasons"] == list(expected.quality_reasons)
     assert ctx["daily_ma_reaction"]["rsi14"] == expected.rsi14
-    assert ctx["daily_ma_reaction"]["rsi_state"] == expected.rsi_state
-    assert ctx["daily_ma_reaction"]["rsi_bonus"] == expected.rsi_bonus
-    assert ctx["daily_ma_reaction"]["rsi_reasons"] == list(expected.rsi_reasons)
     assert ctx["daily_ma_reaction"]["five_day_state"] == expected.five_day_state
     json.dumps(ctx["daily_ma_reaction"])
 
@@ -157,9 +151,6 @@ def test_build_context_tolerates_default_indexed_empty_frames():
             "sma20": None,
             "sma60": None,
             "rsi14": None,
-            "rsi_state": "UNKNOWN",
-            "rsi_bonus": 0,
-            "rsi_reasons": [],
             "five_day_state": "UNKNOWN",
         },
         "pullback_state": "none",

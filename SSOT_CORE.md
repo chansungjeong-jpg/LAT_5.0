@@ -103,6 +103,14 @@ Channel position is `(price - lower) / (upper - lower)`:
 - 0.90 or above: WATCH; no new entry.
 - Invalid channel: `CHANNEL_UNKNOWN/WATCH`.
 
+## RSI Observation
+
+Wilder RSI(14) is an observation-only completed-daily-bar value. It uses only
+bars strictly before `as_of`; unavailable or invalid calculation is recorded
+as `rsi14=null` with `rsi14` in `unknown_fields`. RSI has no automatic state,
+score adjustment, reason code, gate, Hard Block, entry-eligibility, or WATCH
+policy.
+
 ## Five-Minute Trigger
 
 Anchor candle:

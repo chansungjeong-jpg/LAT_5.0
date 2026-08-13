@@ -27,9 +27,6 @@ class DailyMAReaction:
     sma20: float | None
     sma60: float | None
     rsi14: float | None
-    rsi_state: str
-    rsi_bonus: int
-    rsi_reasons: tuple[str, ...]
     status: str
     reasons: tuple[str, ...]
     unknown_fields: tuple[str, ...]
@@ -105,9 +102,6 @@ def _unknown_result(
         sma20=sma20,
         sma60=sma60,
         rsi14=rsi14,
-        rsi_state="UNKNOWN",
-        rsi_bonus=0,
-        rsi_reasons=(),
         status="UNKNOWN",
         reasons=("REQUIRED_DATA_UNKNOWN",),
         unknown_fields=tuple(unknown_fields),
@@ -116,47 +110,6 @@ def _unknown_result(
         quality_method=None,
         five_day_state="UNKNOWN",
     )
-
-
-def _rsi_confirmation(
-    validated: pd.DataFrame,
-    rsi14_series: pd.Series,
-    *,
-    reaction: str,
-) -> tuple[str, int, tuple[str, ...]]:
-    current_rsi = float(rsi14_series.iloc[-1])
-    previous_rsi = float(rsi14_series.iloc[-2])
-    if current_rsi >= 70.0:
-        return "OVERBOUGHT", 0, ("RSI_OVERBOUGHT",)
-    if current_rsi < 50.0 and current_rsi < previous_rsi:
-        return "WEAKENING_BELOW_50", 0, ("RSI_WEAKENING_BELOW_50",)
-    if reaction in {"NONE", "SMA5_CLOSE_BREAK", "SMA20_CLOSE_BREAK"}:
-        return "NEUTRAL", 0, ()
-
-    reasons: list[str] = []
-    bonus = 0
-    if previous_rsi < 30.0 and current_rsi >= 30.0:
-        bonus += 3
-        reasons.append("RSI_OVERSOLD_RECOVERY")
-        state = "OVERSOLD_RECOVERY"
-    elif previous_rsi < 40.0 and current_rsi >= 40.0:
-        bonus += 2
-        reasons.append("RSI_40_RECOVERY")
-        state = "RSI_40_RECOVERY"
-    else:
-        state = "NEUTRAL"
-
-    price_lows = validated["low"]
-    current_price_low = float(price_lows.iloc[-5:].min())
-    previous_price_low = float(price_lows.iloc[-10:-5].min())
-    current_rsi_low = float(rsi14_series.iloc[-5:].min())
-    previous_rsi_low = float(rsi14_series.iloc[-10:-5].min())
-    if current_price_low < previous_price_low and current_rsi_low > previous_rsi_low:
-        bonus += 2
-        reasons.append("RSI_BULLISH_DIVERGENCE")
-        if state == "NEUTRAL":
-            state = "BULLISH_DIVERGENCE"
-    return state, bonus, tuple(reasons)
 
 
 def _quality_bonus(
@@ -333,20 +286,20 @@ def score_daily_ma_reaction(
     sma5 = _sma(close, 5)
     sma20 = _sma(close, 20)
     sma60 = _sma(close, 60)
-    unknown_fields = [
+    ma_unknown_fields = [
         name
         for name, value in (("SMA5", sma5), ("SMA20", sma20), ("SMA60", sma60))
         if value is None
     ]
-    if rsi14 is None:
-        unknown_fields.append("rsi14")
-    if unknown_fields:
+    if ma_unknown_fields:
         return _unknown_result(
             sma5=sma5,
             sma20=sma20,
             sma60=sma60,
             rsi14=rsi14,
-            unknown_fields=unknown_fields,
+            unknown_fields=ma_unknown_fields + (
+                ["rsi14"] if rsi14 is None else []
+            ),
         )
 
     sma60_series = _sma_series(close, 60)
@@ -412,27 +365,18 @@ def score_daily_ma_reaction(
         sma20_series=sma20_series,
         sma60_series=sma60_series,
     )
-    rsi_state, rsi_bonus, rsi_reasons = _rsi_confirmation(
-        validated,
-        rsi14_series,
-        reaction=reaction,
-    )
-
     return DailyMAReaction(
         reaction=reaction,
         base_score=base_score,
         quality_bonus=quality_bonus,
-        total_score=min(20, base_score + quality_bonus + rsi_bonus),
+        total_score=min(20, base_score + quality_bonus),
         sma5=sma5,
         sma20=sma20,
         sma60=sma60,
         rsi14=rsi14,
-        rsi_state=rsi_state,
-        rsi_bonus=rsi_bonus,
-        rsi_reasons=rsi_reasons,
         status="KNOWN",
         reasons=(reaction,) if reaction != "NONE" else (),
-        unknown_fields=(),
+        unknown_fields=("rsi14",) if rsi14 is None else (),
         quality_components=quality_components,
         quality_reasons=quality_reasons,
         quality_method=quality_method,
