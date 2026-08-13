@@ -85,6 +85,14 @@ def _wilder_rsi_series(close: pd.Series, window: int = 14) -> pd.Series:
     return result
 
 
+def wilder_rsi14(close: pd.Series) -> float | None:
+    """Return the latest Wilder RSI(14), or None when unavailable."""
+    series = _wilder_rsi_series(pd.to_numeric(close, errors="coerce"), window=14)
+    if series.empty or pd.isna(series.iloc[-1]) or not isfinite(float(series.iloc[-1])):
+        return None
+    return float(series.iloc[-1])
+
+
 def _unknown_result(
     *,
     sma5: float | None,
@@ -280,9 +288,7 @@ def score_daily_ma_reaction(
         )
 
     close = validated["close"]
-    rsi14_series = _wilder_rsi_series(close)
-    rsi14_value = rsi14_series.iloc[-1] if not rsi14_series.empty else float("nan")
-    rsi14 = float(rsi14_value) if pd.notna(rsi14_value) and isfinite(float(rsi14_value)) else None
+    rsi14 = wilder_rsi14(close)
     sma5 = _sma(close, 5)
     sma20 = _sma(close, 20)
     sma60 = _sma(close, 60)
@@ -392,4 +398,5 @@ __all__ = [
     "DailyMAReaction",
     "score_daily_ma_reaction",
     "score_daily_reaction",
+    "wilder_rsi14",
 ]

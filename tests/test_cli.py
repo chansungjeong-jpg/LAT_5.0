@@ -203,6 +203,7 @@ def test_hourly_pullback_report_serializes_supplied_location_evidence():
                 "evaluated_at": "2026-08-07 12:00:00",
                 "final_state": "BUY_READY",
                 "location_score": 91,
+                "m60_rsi14": 55.0,
                 "daily_ma_reaction": daily_reaction,
                 "rr_breakdown": rr_breakdown,
             }],
@@ -215,6 +216,59 @@ def test_hourly_pullback_report_serializes_supplied_location_evidence():
     assert '"reaction": "SMA5_RECOVERY"' in report
     assert '"sma5": 101.0' in report
     assert '"rsi14": 72.0' in report
+    assert '"m60_rsi14": 55.0' in report
     assert '"current_price": 103.0' in report
     assert '"supply_zone_method": "swing_high_proxy_v1"' in report
     assert "volume_score" not in report
+
+
+def test_hourly_pullback_report_orders_eligible_positions_by_score():
+    daily_reaction = {"reaction": "SMA5_HOLD", "score": 3}
+    report = render_hourly_pullback_reversal_report(
+        summary={
+            "trades": 0,
+            "win_rate": 0.0,
+            "profit_factor": 0.0,
+            "expectancy": 0.0,
+            "net_pnl": 0.0,
+            "return_pct": 0.0,
+            "max_drawdown": 0.0,
+        },
+        diagnostics={
+            "universe_symbols": 2,
+            "minute_covered_symbols": 2,
+            "hourly_covered_symbols": 2,
+            "strong_breakout_count": 0,
+            "pullback_count": 0,
+            "reversal_trigger_count": 0,
+            "location_decisions": [
+                {
+                    "symbol": "LOW",
+                    "name": "Low",
+                    "evaluated_at": "2026-08-13",
+                    "final_state": "WATCH",
+                    "location_score": 90,
+                    "entry_eligible": False,
+                    "daily_ma_reaction": daily_reaction,
+                    "rr_breakdown": None,
+                },
+                {
+                    "symbol": "HIGH",
+                    "name": "High",
+                    "evaluated_at": "2026-08-13",
+                    "final_state": "BUY_READY",
+                    "location_score": 80,
+                    "entry_eligible": True,
+                    "daily_ma_reaction": daily_reaction,
+                    "rr_breakdown": None,
+                },
+            ]
+        },
+        config=BacktestConfig(),
+        source_db="market.db",
+        start=None,
+        end=None,
+        ticker=None,
+    )
+
+    assert report.index("| HIGH |") < report.index("| LOW |")

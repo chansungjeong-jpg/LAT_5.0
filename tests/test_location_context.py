@@ -53,6 +53,7 @@ def test_build_context_with_no_data_returns_safe_defaults():
             "five_day_state": "UNKNOWN",
         },
         "pullback_state": "none",
+        "m60_rsi14": None,
     }
 
 
@@ -115,6 +116,37 @@ def test_build_context_serializes_completed_daily_ma_reaction_only():
     json.dumps(ctx["daily_ma_reaction"])
 
 
+def test_build_context_exposes_observation_only_60m_rsi():
+    hourly_index = pd.date_range("2026-08-09 00:00", periods=30, freq="h")
+    closes = pd.Series(range(100, 130), index=hourly_index, dtype=float)
+    hourly = pd.DataFrame(
+        {
+            "open": closes - 1,
+            "high": closes + 1,
+            "low": closes - 2,
+            "close": closes,
+            "volume": 1000.0,
+            "ema60": closes,
+            "ema120": closes,
+            "atr20": 2.0,
+        },
+        index=hourly_index,
+    )
+    daily = _rising_daily()
+
+    ctx = build_context(
+        daily=daily,
+        daily_ema=daily_ema_context(daily),
+        hourly=hourly,
+        minutes=_empty(["open", "high", "low", "close", "volume", "ema20_5m"]),
+        as_of=pd.Timestamp("2026-08-10"),
+        cfg=LocationScoreConfig(),
+    )
+
+    assert isinstance(ctx["m60_rsi14"], float)
+    assert 0.0 <= ctx["m60_rsi14"] <= 100.0
+
+
 def test_build_context_tolerates_default_indexed_empty_frames():
     """Real KiwoomDataStore.load_daily/load_minutes return a plain empty
     DataFrame (default RangeIndex, no datetime dtype) for a brand-new ticker
@@ -154,6 +186,7 @@ def test_build_context_tolerates_default_indexed_empty_frames():
             "five_day_state": "UNKNOWN",
         },
         "pullback_state": "none",
+        "m60_rsi14": None,
     }
 
 

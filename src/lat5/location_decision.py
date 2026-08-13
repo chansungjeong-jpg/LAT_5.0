@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 from lat5.data import aggregate_weekly
-from lat5.daily_ma_reaction import score_daily_reaction
+from lat5.daily_ma_reaction import score_daily_reaction, wilder_rsi14
 from lat5.hourly_abc_support import find_five_minute_reversal_entry, find_hourly_ma60_pullback, strong_hourly_breakout_at
 from lat5.location_score import evaluate_daily_ma_reaction_gate
 from lat5.scoring import daily_trend
@@ -173,6 +173,11 @@ def build_context(
             ctx["m60_trend_ok"] = (
                 float(last["close"]) >= float(last["ema60"]) >= float(last["ema120"])
             )
+    ctx["m60_rsi14"] = (
+        wilder_rsi14(prior_hourly["close"])
+        if not prior_hourly.empty and "close" in prior_hourly.columns
+        else None
+    )
     if len(prior_hourly) >= 2:
         previous_ema60 = prior_hourly.iloc[-2].get("ema60")
         current_ema60 = prior_hourly.iloc[-1].get("ema60")
@@ -489,6 +494,7 @@ def evaluate_watchlist_position(ctx: dict, cfg: LocationScoreConfig) -> dict:
         "unknown_fields": unknown_fields,
         "rr": rr,
         "sector_score": sector_score,
+        "m60_rsi14": ctx.get("m60_rsi14"),
         "rr_breakdown": rr_breakdown,
         "daily_ma_reaction": ctx.get(
             "daily_ma_reaction",

@@ -5,6 +5,7 @@ from lat5.daily_ma_reaction import (
     DailyMAReactionInputs,
     score_daily_ma_reaction,
     score_daily_reaction,
+    wilder_rsi14,
 )
 
 
@@ -380,6 +381,15 @@ def test_plan_public_api_is_available_and_legacy_name_is_compatibility_alias():
 
     assert canonical == legacy
     assert score_daily_reaction is score_daily_ma_reaction
+
+
+def test_wilder_rsi14_returns_latest_value_for_completed_close_series():
+    closes = pd.Series([100 + ((i % 5) - 2) * i for i in range(30)])
+
+    result = wilder_rsi14(closes)
+
+    assert result is not None
+    assert 0.0 <= result <= 100.0
 
 
 def test_sma_values_use_only_completed_dates_before_as_of():

@@ -20,6 +20,7 @@ from lat5.kiwoom_client import KiwoomClient, KiwoomTokenError
 from lat5.lat_credentials import CredentialsError, load_credentials
 from lat5.lat_token_provider import LatTokenError, get_lat_token
 from lat5.location_decision import LocationScoreConfig
+from lat5.position_ranking import rank_location_decisions
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -80,11 +81,13 @@ def _render_location_decisions(diagnostics: dict[str, object]) -> str:
         return ""
 
     rows: list[str] = []
-    for decision in decisions:
+    for decision in rank_location_decisions(decisions):
         if not isinstance(decision, dict):
             continue
+        evidence = dict(decision.get("daily_ma_reaction") or {})
+        evidence["m60_rsi14"] = decision.get("m60_rsi14")
         daily_reaction = json.dumps(
-            decision.get("daily_ma_reaction"),
+            evidence,
             ensure_ascii=False,
             sort_keys=True,
         )
