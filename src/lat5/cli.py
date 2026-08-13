@@ -97,8 +97,9 @@ def _render_location_decisions(diagnostics: dict[str, object]) -> str:
             sort_keys=True,
         )
         rows.append(
-            "| {symbol} | {name} | {evaluated_at} | {final_state} | {score} | "
+            "| {rank} | {symbol} | {name} | {evaluated_at} | {final_state} | {score} | "
             "`{daily_reaction}` | `{rr_breakdown}` |".format(
+                rank=decision.get("position_rank") or "-",
                 symbol=decision.get("symbol", "UNKNOWN"),
                 name=decision.get("name", "UNKNOWN"),
                 evaluated_at=decision.get("evaluated_at", "UNKNOWN"),
@@ -114,8 +115,8 @@ def _render_location_decisions(diagnostics: dict[str, object]) -> str:
         [
             "## 위치 판정 근거",
             "",
-            "| 종목 | 이름 | 평가시각 | 최종 상태 | 위치 점수 | daily_ma_reaction | rr_breakdown |",
-            "|---|---|---|---|---:|---|---|",
+            "| rank | 종목 | 이름 | 평가시각 | 최종 상태 | 위치 점수 | daily_ma_reaction | rr_breakdown |",
+            "|---:|---|---|---|---|---:|---|---|",
             *rows,
         ]
     )

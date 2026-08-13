@@ -271,4 +271,6 @@ def test_hourly_pullback_report_orders_eligible_positions_by_score():
         ticker=None,
     )
 
-    assert report.index("| HIGH |") < report.index("| LOW |")
+    assert "| 1 | HIGH |" in report
+    assert "| - | LOW |" in report
+    assert report.index("| 1 | HIGH |") < report.index("| - | LOW |")
