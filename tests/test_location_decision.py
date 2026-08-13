@@ -475,6 +475,29 @@ def test_sma5_close_break_deducts_score_and_applies_watch_pressure():
     assert "DAILY_MA_WATCH_PRESSURE" in result["vetoes"]
 
 
+def test_rsi_overbought_applies_watch_pressure_without_a_hard_block():
+    ctx = _full_pass_ctx()
+    ctx["daily_ma_reaction_score"] = 20
+    ctx["daily_ma_reaction_state"] = "SMA60_UPWARD_CROSS_STRONG_BULL"
+    ctx["daily_ma_reaction"] = {
+        "reaction": "SMA60_UPWARD_CROSS_STRONG_BULL",
+        "score": 20,
+        "rsi14": 72.0,
+        "rsi_state": "OVERBOUGHT",
+        "rsi_bonus": 0,
+        "rsi_reasons": ["RSI_OVERBOUGHT"],
+        "unknown_fields": [],
+    }
+
+    result = evaluate_watchlist_position(ctx, LocationScoreConfig())
+
+    assert result["state"] == "WATCH"
+    assert result["entry_eligible"] is False
+    assert "DAILY_MA_WATCH_PRESSURE" in result["vetoes"]
+    assert "DAILY_MA_HARD_BLOCK" not in result["vetoes"]
+    assert result["daily_ma_reaction"]["rsi_state"] == "OVERBOUGHT"
+
+
 def test_sma20_close_break_vetoes_buy_ready():
     ctx = _full_pass_ctx()
     ctx["daily_ma_reaction_state"] = "SMA20_CLOSE_BREAK"
@@ -509,7 +532,7 @@ def test_unknown_daily_reaction_vetoes_buy_ready_and_exposes_unknown_fields():
     [
         ("sma5_break", "SMA5_CLOSE_BREAK", -4, "WATCH"),
         ("sma20_break", "SMA20_CLOSE_BREAK", -8, "IGNORE"),
-        ("recovery", "SMA5_RECOVERY", 12, "BUY_READY"),
+        ("recovery", "SMA5_RECOVERY", 12, "WATCH"),
         ("unknown", "UNKNOWN", 0, "IGNORE"),
     ],
 )

@@ -118,6 +118,10 @@ def build_context(
         "sma5": daily_reaction.sma5,
         "sma20": daily_reaction.sma20,
         "sma60": daily_reaction.sma60,
+        "rsi14": daily_reaction.rsi14,
+        "rsi_state": daily_reaction.rsi_state,
+        "rsi_bonus": daily_reaction.rsi_bonus,
+        "rsi_reasons": list(daily_reaction.rsi_reasons),
         "five_day_state": daily_reaction.five_day_state,
     }
     ctx.update(
@@ -304,6 +308,13 @@ def evaluate_watchlist_position(ctx: dict, cfg: LocationScoreConfig) -> dict:
     )
     unknown_fields.extend(daily_reaction_gate.unknown_fields)
     vetoes.extend(daily_reaction_gate.vetoes)
+    rsi_state = (
+        str(reaction_payload.get("rsi_state", ""))
+        if isinstance(reaction_payload, dict)
+        else ""
+    )
+    if rsi_state == "OVERBOUGHT":
+        vetoes.append("DAILY_MA_WATCH_PRESSURE")
 
     required_context_unknown_fields = [
         field
@@ -419,6 +430,8 @@ def evaluate_watchlist_position(ctx: dict, cfg: LocationScoreConfig) -> dict:
         reasons.append("일봉 이평선 반응 점수 반영")
     if "DAILY_MA_WATCH_PRESSURE" in daily_reaction_gate.vetoes:
         wait_for.append("SMA5 종가 회복")
+    if rsi_state == "OVERBOUGHT":
+        wait_for.append("RSI 과매수 완화")
     if "DAILY_MA_REACTION_UNKNOWN" in daily_reaction_gate.vetoes:
         wait_for.append("일봉 이평선 필수 데이터 확인")
     if "DAILY_MA_HARD_BLOCK" in daily_reaction_gate.vetoes:

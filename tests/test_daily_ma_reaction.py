@@ -23,6 +23,111 @@ def frame_with_bars(count: int = 70) -> pd.DataFrame:
     )
 
 
+def rsi_recovery_fixture() -> tuple[pd.DataFrame, pd.Timestamp]:
+    frame = frame_with_bars(70)
+    closes = [100.0, *range(99, 86, -1), 91.0, 94.0]
+    frame.loc[frame.index[-len(closes):], "close"] = closes
+    frame.loc[:, "open"] = frame["close"] - 1.0
+    frame.loc[:, "high"] = frame["close"] + 1.0
+    frame.loc[:, "low"] = frame["close"] - 2.0
+    return frame, frame.index[-1] + pd.Timedelta(days=1)
+
+
+def test_rsi_oversold_recovery_uses_stronger_bonus_when_both_thresholds_cross():
+    frame, as_of = rsi_recovery_fixture()
+
+    result = score_daily_reaction(frame, as_of=as_of)
+
+    assert result.rsi14 >= 30.0
+    assert result.rsi_bonus == 3
+    assert result.rsi_state == "OVERSOLD_RECOVERY"
+    assert result.rsi_reasons == ("RSI_OVERSOLD_RECOVERY",)
+
+
+def test_rsi_bullish_divergence_uses_two_completed_five_bar_windows():
+    frame = frame_with_bars(70)
+    closes = [100.0, *range(99, 86, -1), 89.0, 91.0, 93.0, 95.0, 97.0, 99.0]
+    frame.loc[frame.index[-len(closes):], "close"] = closes
+    frame.loc[:, "open"] = frame["close"] - 1.0
+    frame.loc[:, "high"] = frame["close"] + 1.0
+    frame.loc[:, "low"] = frame["close"] - 2.0
+    frame.loc[frame.index[-10:-5], "low"] = 85.0
+    frame.loc[frame.index[-5:], "low"] = 80.0
+
+    result = score_daily_reaction(frame, as_of=frame.index[-1] + pd.Timedelta(days=1))
+
+    assert result.rsi_state == "RSI_40_RECOVERY"
+    assert result.rsi_bonus == 4
+    assert "RSI_BULLISH_DIVERGENCE" in result.rsi_reasons
+
+
+def test_rsi_overbought_adds_no_quality_score_and_exposes_watch_state():
+    frame = frame_with_bars(70)
+
+    result = score_daily_reaction(frame, as_of=frame.index[-1] + pd.Timedelta(days=1))
+
+    assert result.rsi14 == 100.0
+    assert result.rsi_state == "OVERBOUGHT"
+    assert result.rsi_bonus == 0
+    assert result.rsi_reasons == ("RSI_OVERBOUGHT",)
+
+
+def test_rsi_below_fifty_and_falling_is_weakening_without_bonus():
+    frame = frame_with_bars(70)
+    closes = [140.0, 142.0, 144.0, 146.0, 148.0, 140.0, 132.0, 124.0, 116.0, 108.0]
+    frame.loc[frame.index[-len(closes):], "close"] = closes
+    frame.loc[:, "open"] = frame["close"] - 1.0
+    frame.loc[:, "high"] = frame["close"] + 1.0
+    frame.loc[:, "low"] = frame["close"] - 2.0
+
+    result = score_daily_reaction(frame, as_of=frame.index[-1] + pd.Timedelta(days=1))
+
+    assert result.rsi14 < 50.0
+    assert result.rsi_state == "WEAKENING_BELOW_50"
+    assert result.rsi_bonus == 0
+
+
+def test_rsi_requires_fifteen_completed_closes_and_fails_closed():
+    frame = frame_with_bars(14)
+
+    result = score_daily_reaction(frame, as_of=frame.index[-1] + pd.Timedelta(days=1))
+
+    assert result.status == "UNKNOWN"
+    assert result.rsi14 is None
+    assert result.rsi_state == "UNKNOWN"
+    assert "rsi14" in result.unknown_fields
+
+
+def test_rsi_ignores_current_day_and_future_daily_bars():
+    frame, as_of = rsi_recovery_fixture()
+    expected = score_daily_reaction(frame, as_of=as_of)
+    frame.loc[as_of, ["open", "high", "low", "close", "volume"]] = [1.0, 1_000.0, 0.1, 1_000.0, 1.0]
+
+    actual = score_daily_reaction(frame, as_of=as_of)
+
+    assert actual.rsi14 == expected.rsi14
+    assert actual.rsi_state == expected.rsi_state
+    assert actual.rsi_bonus == expected.rsi_bonus
+
+
+def test_rsi_bonus_cannot_raise_daily_reaction_above_twenty_points():
+    frame = frame_with_bars(70)
+    frame.loc[:, "close"] = 100.0
+    closes = [100.0, 99.0, 98.0, 97.0, 96.0, 95.0, 94.0, 93.0, 92.0, 91.0, 90.0, 89.0, 88.0, 80.0, 105.0]
+    frame.loc[frame.index[-len(closes):], "close"] = closes
+    frame.loc[:, "open"] = frame["close"] - 1.0
+    frame.loc[:, "high"] = frame["close"] + 1.0
+    frame.loc[:, "low"] = frame["close"] - 2.0
+    frame.loc[frame.index[-1], ["open", "high", "low", "close"]] = [99.0, 106.0, 98.0, 105.0]
+
+    result = score_daily_reaction(frame, as_of=frame.index[-1] + pd.Timedelta(days=1))
+
+    assert result.base_score == 10
+    assert result.quality_bonus == 8
+    assert result.rsi_bonus == 3
+    assert result.total_score == 20
+
+
 def sixty_cross_fixture() -> tuple[pd.DataFrame, pd.Timestamp]:
     frame = frame_with_bars(61)
     frame.loc[:, "close"] = 100.0

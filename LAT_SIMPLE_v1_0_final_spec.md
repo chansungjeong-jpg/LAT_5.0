@@ -519,11 +519,22 @@ Hard Block으로 사용하고, 60분 거래량은 최근 20개 완료 봉 평균
 | 7 | `NONE` — 위 반응 없음 | 0 |
 
 품질 보너스는 해당 완료 일봉의 반응 품질과 함께 계산하며, 합계의 상한은 항상
-`min(20, 기본 점수 + 품질 보너스)`다. 보너스는 강한 몸통 +3, 고가 부근 마감 +2,
+`min(20, 기본 점수 + 기존 품질 보너스 + RSI 보너스)`다. 보너스는 강한 몸통 +3, 고가 부근 마감 +2,
 반응 SMA 상승 기울기 +3, SMA20의 SMA60 상향 골든크로스 +2다. 골든크로스는 독립
 매수 신호나 별도 위치점수 구성요소가 아니며 이 품질 보너스로만 반영한다.
 대표반응이 `NONE`, `SMA5_CLOSE_BREAK`, `SMA20_CLOSE_BREAK`이면 캔들 품질이나
 골든크로스가 성립해도 품질 보너스는 0이다. 이탈 감점은 품질 보너스로 상쇄하지 않는다.
+
+Wilder RSI(14)는 독립 100점 축이 아니라 이 반응 품질의 보조값이다. RSI 계산도 `as_of`
+이전의 완료 일봉만 사용한다. 전일 RSI가 30 미만이고 현재 RSI가 30 이상이면
+`RSI_OVERSOLD_RECOVERY` +3, 전일 RSI가 40 미만이고 현재 RSI가 40 이상이면
+`RSI_40_RECOVERY` +2를 적용하며 둘이 동시에 성립하면 +3만 선택한다. 최근 완료봉
+5개의 가격 low 최저값이 직전 5개 low 최저값보다 낮고, 같은 두 구간의 RSI 최저값은
+높으면 `RSI_BULLISH_DIVERGENCE` +2를 더한다. RSI가 70 이상이면
+`rsi_state=OVERBOUGHT`, `rsi_bonus=0`으로 기록하고 Hard Block이 아닌 WATCH 압력을
+evaluator에 전달한다. 현재 RSI가 50 미만이며 직전 완료봉 RSI보다 하락하면
+`rsi_state=WEAKENING_BELOW_50`, 보너스 0점이다. RSI 데이터가 부족하거나 NaN이면
+기존 일봉 반응 `UNKNOWN` 계약을 사용하고 `unknown_fields`에 `rsi14`를 남긴다.
 
 SMA5 이탈은 Hard Block이 아니다. 장중 저가만 SMA5 아래이고 종가가 회복하면 이탈
 감점을 적용하지 않는다. 종가 이탈은 -4점과 WATCH 압력으로 남기고, 다음 완료 일봉이
@@ -535,7 +546,7 @@ SMA20 종가 이탈은 `DAILY_MA_HARD_BLOCK`으로 BUY 계열 판정을 차단�
 반응 이름을 복사하지 않고 현재 종가의 SMA5 유지·이탈·회복 상태를 별도로 기록한다.
 
 평가 시점 `as_of`에는 그 이전에 완료된 일봉만 사용한다. `as_of` 당일 봉, 미완료 봉,
-미래 봉은 SMA·ATR·품질·반응 계산에 사용하지 않는다. 필요한 OHLCV/SMA/ATR 데이터가
+미래 봉은 SMA·ATR·RSI·품질·반응 계산에 사용하지 않는다. 필요한 OHLCV/SMA/ATR/RSI 데이터가
 부족하면 반응은 `UNKNOWN`, 점수는 0으로 기록하며 BUY 근거로 대체하지 않는다.
 
 ---
@@ -803,6 +814,10 @@ daily_ma_reaction.quality_reasons
 daily_ma_reaction.sma5
 daily_ma_reaction.sma20
 daily_ma_reaction.sma60
+daily_ma_reaction.rsi14
+daily_ma_reaction.rsi_state
+daily_ma_reaction.rsi_bonus
+daily_ma_reaction.rsi_reasons
 daily_ma_reaction.five_day_state
 minute_ema20_gap_pct
 daily_ema10_gap_pct
@@ -814,7 +829,7 @@ final_state
 reason
 ```
 
-`daily_ma_reaction`은 대표반응·기본점수·품질 보너스/근거·SMA값·5일선 상태를
+`daily_ma_reaction`은 대표반응·기본점수·품질 보너스/근거·SMA값·RSI값/상태/보너스/근거·5일선 상태를
 직렬화한 위치결정 필드다. `volume_score`는 위치 점수의 최대 30점 구성요소이며,
 `distance_state`는 점수 가산이 아니라 과열 Hard Block/WATCH 상태다. `rr_breakdown`은
 현재가·손절가·목표가·기대손실·기대보상·RR과 `supply_zone_method`를 포함할 수 있다.

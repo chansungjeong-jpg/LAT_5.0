@@ -59,3 +59,26 @@
   최종 필드를 전달하지 않으므로 Markdown에서 만들지 않는다.
 - 실제 Volume Profile은 아직 구현되지 않았고, 현재 매물대 근거는 실제로 계산된
   경우에만 `swing_high_proxy_v1`로 표시한다.
+
+## RSI(14) confirmation 추가
+
+- Wilder RSI(14)를 별도 100점 축으로 추가하지 않고 `daily_ma_reaction` 품질
+  보조값으로만 연결했다. 거래량 30점 최고 비중과 전체 100점 배분은 변경하지 않았다.
+- 완료 일봉과 `as_of` 이전 자료만 사용한다. RSI가 부족하거나 NaN이면 기존 반응을
+  `UNKNOWN`으로 유지하고 `unknown_fields`에 `rsi14`를 남긴다.
+- `RSI_OVERSOLD_RECOVERY`는 +3, `RSI_40_RECOVERY`는 +2이며 둘이 동시에 성립하면
+  +3만 적용한다. 현재 완료봉 기준 두 개의 연속된 5봉 window에서 저점은 낮고 RSI
+  저점은 높으면 `RSI_BULLISH_DIVERGENCE` +2를 더한다.
+- RSI 70 이상은 `OVERBOUGHT`, 0점, `DAILY_MA_WATCH_PRESSURE`로만 처리한다.
+  현재 RSI가 50 미만이고 직전 완료봉보다 하락하면 `WEAKENING_BELOW_50`, 0점이다.
+  어떤 보너스 조합도 daily reaction 20점 상한을 넘지 않는다.
+- `rsi14`, `rsi_state`, `rsi_bonus`, `rsi_reasons`를 context·decision payload·CLI
+  Markdown·backtest/ledger 전달 payload에 보존했다. OVERBOUGHT는 Hard Block이 아니며
+  기존 `entry_eligible` 및 다른 veto 계약은 그대로다.
+
+| RSI 검증 | 명령 | 결과 |
+|---|---|---|
+| daily/context/decision/CLI/gate 집중 회귀 | `python -m pytest tests/test_daily_ma_reaction.py tests/test_location_context.py tests/test_location_decision.py tests/test_cli.py tests/test_location_gate_integration.py -q` | 134 passed |
+| 전체 회귀 | `python -m pytest -q` | 250 passed |
+| 컴파일 | `python -m compileall -q src` | exit 0 |
+| diff 검사 | `git diff --check` | clean |

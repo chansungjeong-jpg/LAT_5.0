@@ -174,6 +174,10 @@ def test_hourly_pullback_report_serializes_supplied_location_evidence():
         "sma5": 101.0,
         "sma20": 99.0,
         "sma60": 95.0,
+        "rsi14": 72.0,
+        "rsi_state": "OVERBOUGHT",
+        "rsi_bonus": 0,
+        "rsi_reasons": ["RSI_OVERBOUGHT"],
         "five_day_state": "SMA5_RECOVERY",
     }
     rr_breakdown = {
@@ -213,6 +217,9 @@ def test_hourly_pullback_report_serializes_supplied_location_evidence():
     assert "## 위치 판정 근거" in report
     assert '"reaction": "SMA5_RECOVERY"' in report
     assert '"sma5": 101.0' in report
+    assert '"rsi14": 72.0' in report
+    assert '"rsi_state": "OVERBOUGHT"' in report
+    assert '"rsi_reasons": ["RSI_OVERBOUGHT"]' in report
     assert '"current_price": 103.0' in report
     assert '"supply_zone_method": "swing_high_proxy_v1"' in report
     assert "volume_score" not in report
