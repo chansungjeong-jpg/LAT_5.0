@@ -25,6 +25,45 @@ def _is_unknown_required_context(value: object) -> bool:
     )
 
 
+def _daily_sma5_distance_signal(daily: pd.DataFrame) -> tuple[float | None, str, int]:
+    """Score whether completed daily closes are moving toward or away from SMA5."""
+    if daily.empty or not {"close"}.issubset(daily.columns):
+        return None, "UNKNOWN", 0
+    close = pd.to_numeric(daily["close"], errors="coerce")
+    sma5 = close.rolling(5, min_periods=5).mean()
+    distance = ((close - sma5).abs() / sma5.abs()).replace([float("inf"), -float("inf")], pd.NA)
+    distance = distance.dropna()
+    if len(distance) < 3:
+        return None, "UNKNOWN", 0
+
+    recent = distance.iloc[-3:]
+    current = float(recent.iloc[-1])
+    delta = float(recent.iloc[-1] - recent.iloc[0])
+    epsilon = 0.0001
+    if delta < -epsilon:
+        trend = "CLOSER"
+        if current <= 0.01:
+            score = 10
+        elif current <= 0.02:
+            score = 7
+        elif current <= 0.03:
+            score = 4
+        else:
+            score = 0
+    elif delta > epsilon:
+        trend = "WIDER"
+        if current > 0.05:
+            score = -10
+        elif current > 0.03:
+            score = -5
+        else:
+            score = 0
+    else:
+        trend = "STABLE"
+        score = 0
+    return current, trend, score
+
+
 @dataclass(frozen=True)
 class LocationScoreWeights:
     sector_flow: int = 15
@@ -121,12 +160,18 @@ def build_context(
         "rsi14": daily_reaction.rsi14,
         "five_day_state": daily_reaction.five_day_state,
     }
+    sma5_distance_pct, sma5_distance_trend, sma5_distance_score = _daily_sma5_distance_signal(
+        prior_daily
+    )
     ctx.update(
         {
             "daily_ma_reaction_score": daily_reaction.total_score,
             "daily_ma_reaction_state": daily_reaction.reaction,
             "daily_ma_reaction_reasons": list(daily_reaction.reasons),
             "daily_ma_reaction": daily_reaction_details,
+            "sma5_distance_pct": sma5_distance_pct,
+            "sma5_distance_trend": sma5_distance_trend,
+            "sma5_distance_score": sma5_distance_score,
         }
     )
 
@@ -423,8 +468,9 @@ def evaluate_watchlist_position(ctx: dict, cfg: LocationScoreConfig) -> dict:
         "slope": slope_score,
         "recent_5d_bullish": recent_bullish_score,
         "daily_trend_persistence": 5 if ctx.get("daily_trend_ok") is True else 0,
+        "daily_sma5_distance": int(ctx.get("sma5_distance_score", 0) or 0),
     }
-    score = sum(score_components.values())
+    score = max(0, min(100, sum(score_components.values())))
     if daily_reaction_gate.component > 0:
         reasons.append("일봉 이평선 반응 점수 반영")
     if "DAILY_MA_WATCH_PRESSURE" in daily_reaction_gate.vetoes:

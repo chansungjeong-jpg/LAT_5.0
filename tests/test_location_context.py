@@ -52,8 +52,11 @@ def test_build_context_with_no_data_returns_safe_defaults():
             "rsi14": None,
             "five_day_state": "UNKNOWN",
         },
-        "pullback_state": "none",
-        "m60_rsi14": None,
+            "pullback_state": "none",
+            "m60_rsi14": None,
+            "sma5_distance_pct": None,
+            "sma5_distance_trend": "UNKNOWN",
+            "sma5_distance_score": 0,
     }
 
 
@@ -147,6 +150,33 @@ def test_build_context_exposes_observation_only_60m_rsi():
     assert 0.0 <= ctx["m60_rsi14"] <= 100.0
 
 
+def test_build_context_scores_daily_sma5_distance_when_price_closes_in():
+    index = pd.date_range("2026-08-01", periods=10, freq="D")
+    close = pd.Series([100, 100, 100, 100, 100, 105, 104, 104, 104, 104], index=index)
+    daily = pd.DataFrame(
+        {
+            "open": close - 1,
+            "high": close + 1,
+            "low": close - 2,
+            "close": close,
+            "volume": 1000.0,
+        },
+        index=index,
+    )
+
+    ctx = build_context(
+        daily=daily,
+        daily_ema=daily_ema_context(daily),
+        hourly=_empty(["open", "high", "low", "close", "volume", "ema60", "ema120"]),
+        minutes=_empty(["open", "high", "low", "close", "volume", "ema20_5m"]),
+        as_of=index[-1] + pd.Timedelta(days=1),
+        cfg=LocationScoreConfig(),
+    )
+
+    assert ctx["sma5_distance_trend"] == "CLOSER"
+    assert ctx["sma5_distance_score"] == 10
+
+
 def test_build_context_tolerates_default_indexed_empty_frames():
     """Real KiwoomDataStore.load_daily/load_minutes return a plain empty
     DataFrame (default RangeIndex, no datetime dtype) for a brand-new ticker
@@ -185,8 +215,11 @@ def test_build_context_tolerates_default_indexed_empty_frames():
             "rsi14": None,
             "five_day_state": "UNKNOWN",
         },
-        "pullback_state": "none",
-        "m60_rsi14": None,
+            "pullback_state": "none",
+            "m60_rsi14": None,
+            "sma5_distance_pct": None,
+            "sma5_distance_trend": "UNKNOWN",
+            "sma5_distance_score": 0,
     }
 
 

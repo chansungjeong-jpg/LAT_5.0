@@ -139,9 +139,20 @@ def test_full_pass_reaches_buy_ready_with_max_score():
         "slope": 10,
         "recent_5d_bullish": 5,
         "daily_trend_persistence": 5,
+        "daily_sma5_distance": 0,
     }
     assert result["state"] == "BUY_READY"
     assert result["vetoes"] == []
+
+
+def test_sma5_distance_is_an_auxiliary_score_component():
+    ctx = _full_pass_ctx()
+    ctx["sma5_distance_score"] = -10
+
+    result = evaluate_watchlist_position(ctx, LocationScoreConfig())
+
+    assert result["score_components"]["daily_sma5_distance"] == -10
+    assert result["location_score"] == 70
 
 
 def test_location_decision_exposes_supply_rr_breakdown():
