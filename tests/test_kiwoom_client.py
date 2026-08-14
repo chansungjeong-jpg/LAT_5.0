@@ -80,8 +80,34 @@ def test_post_pages_fails_when_continuation_exceeds_page_limit():
         [FakeResponse({"return_code": 0}, {"cont-yn": "Y", "next-key": "NEXT"})]
     )
     client = KiwoomClient(
-        _token(), session=session, min_interval=0, max_pages=1, sleep=lambda _: None
+        _token(),
+        session=session,
+        min_interval=0,
+        max_pages=1,
+        max_pages_by_api={"ka10080": 1},
+        sleep=lambda _: None,
     )
 
     with pytest.raises(KiwoomApiError, match="page limit"):
         list(client.post_pages("ka10080", "/api/dostk/chart", {}))
+
+
+def test_post_pages_uses_api_specific_page_limit():
+    session = FakeSession(
+        [
+            FakeResponse({"return_code": 0}, {"cont-yn": "Y", "next-key": "NEXT"}),
+            FakeResponse({"return_code": 0}, {"cont-yn": "N"}),
+        ]
+    )
+    client = KiwoomClient(
+        _token(),
+        session=session,
+        min_interval=0,
+        max_pages=1,
+        max_pages_by_api={"ka10080": 2},
+        sleep=lambda _: None,
+    )
+
+    pages = list(client.post_pages("ka10080", "/api/dostk/chart", {}))
+
+    assert [page.page_no for page in pages] == [1, 2]

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Callable, Iterator
+from typing import Callable, Iterator, Mapping
 
 import requests
 
@@ -34,6 +34,7 @@ class KiwoomClient:
         session=None,
         min_interval: float = 0.35,
         max_pages: int = 20,
+        max_pages_by_api: Mapping[str, int] | None = None,
         max_attempts: int = 3,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
@@ -43,6 +44,11 @@ class KiwoomClient:
         self.session = session or requests.Session()
         self.min_interval = min_interval
         self.max_pages = max_pages
+        self.max_pages_by_api = {
+            "ka10080": 100,
+            "ka10059": 100,
+            **dict(max_pages_by_api or {}),
+        }
         self.max_attempts = max_attempts
         self.sleep = sleep
         self.clock = clock
@@ -88,13 +94,14 @@ class KiwoomClient:
 
     def post_pages(self, api_id: str, path: str, body: dict) -> Iterator[ApiPage]:
         continuation: dict[str, str] = {}
-        for page_no in range(1, self.max_pages + 1):
+        page_limit = self.max_pages_by_api.get(api_id, self.max_pages)
+        for page_no in range(1, page_limit + 1):
             payload, response_headers = self._post(api_id, path, body, continuation)
             cont_yn = response_headers.get("cont-yn", "N")
             next_key = response_headers.get("next-key", "")
             yield ApiPage(api_id, page_no, payload, cont_yn, next_key)
             if cont_yn.upper() != "Y":
                 return
-            if page_no == self.max_pages:
-                raise KiwoomApiError(f"page limit exceeded for {api_id}: {self.max_pages}")
+            if page_no == page_limit:
+                raise KiwoomApiError(f"page limit exceeded for {api_id}: {page_limit}")
             continuation = {"cont-yn": "Y", "next-key": next_key}
