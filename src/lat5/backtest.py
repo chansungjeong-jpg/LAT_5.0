@@ -911,6 +911,7 @@ def run_hourly_pullback_reversal_baseline(
                             "final_state": location["state"],
                             "entry_eligible": location.get("entry_eligible") is True,
                             "location_score": location["location_score"],
+                            "score_components": dict(location.get("score_components", {})),
                             "vetoes": list(location.get("vetoes", [])),
                             "unknown_fields": list(location.get("unknown_fields", [])),
                             "m60_rsi14": location.get("m60_rsi14"),

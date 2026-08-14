@@ -138,6 +138,7 @@ def test_runner_allows_candidate_when_location_state_ready(monkeypatch, tmp_path
             "state": "BUY_READY",
             "entry_eligible": True,
             "location_score": 90,
+            "score_components": {},
             "vetoes": [],
             "unknown_fields": [],
             "daily_ma_reaction": {
@@ -179,6 +180,7 @@ def test_runner_allows_candidate_when_location_state_ready(monkeypatch, tmp_path
             "final_state": "BUY_READY",
             "entry_eligible": True,
             "location_score": 90,
+            "score_components": {},
             "vetoes": [],
             "unknown_fields": [],
             "m60_rsi14": None,
