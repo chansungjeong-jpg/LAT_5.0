@@ -181,6 +181,7 @@ def test_runner_allows_candidate_when_location_state_ready(monkeypatch, tmp_path
             "location_score": 90,
             "vetoes": [],
             "unknown_fields": [],
+            "m60_rsi14": None,
             "daily_ma_reaction": {"reaction": "UNKNOWN", "score": 0},
             "rr_breakdown": {
                 "current_price": 100.0,

@@ -913,6 +913,7 @@ def run_hourly_pullback_reversal_baseline(
                             "location_score": location["location_score"],
                             "vetoes": list(location.get("vetoes", [])),
                             "unknown_fields": list(location.get("unknown_fields", [])),
+                            "m60_rsi14": location.get("m60_rsi14"),
                             "daily_ma_reaction": location.get("daily_ma_reaction"),
                             "rr_breakdown": location.get("rr_breakdown"),
                         }
