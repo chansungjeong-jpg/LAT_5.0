@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Callable, Iterable
 
 from lat5.kiwoom_client import KiwoomApiError, KiwoomTokenError
@@ -124,6 +124,17 @@ def collect_symbol(
     base_date: str,
 ) -> dict[str, int]:
     trade_date = _date(base_date)
+    flow_cutoff = (
+        datetime.strptime(base_date, "%Y%m%d").date() - timedelta(days=365)
+    ).isoformat()
+
+    def stop_foreign_flow(payload: dict[str, Any]) -> bool:
+        rows = payload.get("stk_invsr_orgn")
+        if not isinstance(rows, list) or not rows:
+            return False
+        dates = [str(row.get("dt")) for row in rows if isinstance(row, dict)]
+        return bool(dates) and max(dates) < flow_cutoff.replace("-", "")
+
     requests: list[tuple[str, str, dict[str, str], Callable]] = [
         (
             "ka10081",
@@ -155,15 +166,19 @@ def collect_symbol(
                 "trde_tp": "0",
                 "unit_tp": "1000",
             },
-            lambda payload: store.save_foreign_flow(
-                run_id, parse_foreign_flow(ticker, payload)
-            ),
+            lambda payload: store.save_foreign_flow(run_id, parse_foreign_flow(ticker, payload)),
         ),
     ]
     result = {"success": 0, "errors": 0}
     for api_id, path, body, save in requests:
         try:
-            for page in client.post_pages(api_id, path, body):
+            stop_after = stop_foreign_flow if api_id == "ka10059" else None
+            pages = (
+                client.post_pages(api_id, path, body, stop_after=stop_after)
+                if stop_after is not None
+                else client.post_pages(api_id, path, body)
+            )
+            for page in pages:
                 store.save_raw_page(run_id, ticker, page)
                 save(page.payload)
             result["success"] += 1

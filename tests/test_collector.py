@@ -105,12 +105,13 @@ class FakeClient:
         self.payloads = payloads
         self.calls = []
 
-    def post_pages(self, api_id, path, body):
+    def post_pages(self, api_id, path, body, *, stop_after=None):
         self.calls.append((api_id, path, body))
         value = self.payloads[api_id]
         if isinstance(value, Exception):
             raise value
-        yield ApiPage(api_id, 1, value, "N", "")
+        page = ApiPage(api_id, 1, value, "N", "")
+        yield page
 
 
 class EventStore:

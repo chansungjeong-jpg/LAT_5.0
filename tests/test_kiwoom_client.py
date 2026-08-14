@@ -111,3 +111,22 @@ def test_post_pages_uses_api_specific_page_limit():
     pages = list(client.post_pages("ka10080", "/api/dostk/chart", {}))
 
     assert [page.page_no for page in pages] == [1, 2]
+
+
+def test_post_pages_can_stop_after_a_sufficient_page():
+    session = FakeSession(
+        [FakeResponse({"return_code": 0, "rows": [1]}, {"cont-yn": "Y", "next-key": "NEXT"})]
+    )
+    client = KiwoomClient(_token(), session=session, min_interval=0, sleep=lambda _: None)
+
+    pages = list(
+        client.post_pages(
+            "ka10059",
+            "/api/dostk/stkinfo",
+            {},
+            stop_after=lambda payload: payload["rows"] == [1],
+        )
+    )
+
+    assert [page.page_no for page in pages] == [1]
+    assert len(session.calls) == 1

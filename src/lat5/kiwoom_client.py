@@ -92,7 +92,14 @@ class KiwoomClient:
             return payload, dict(response.headers)
         raise KiwoomApiError("unreachable request state")
 
-    def post_pages(self, api_id: str, path: str, body: dict) -> Iterator[ApiPage]:
+    def post_pages(
+        self,
+        api_id: str,
+        path: str,
+        body: dict,
+        *,
+        stop_after: Callable[[dict], bool] | None = None,
+    ) -> Iterator[ApiPage]:
         continuation: dict[str, str] = {}
         page_limit = self.max_pages_by_api.get(api_id, self.max_pages)
         for page_no in range(1, page_limit + 1):
@@ -100,6 +107,8 @@ class KiwoomClient:
             cont_yn = response_headers.get("cont-yn", "N")
             next_key = response_headers.get("next-key", "")
             yield ApiPage(api_id, page_no, payload, cont_yn, next_key)
+            if stop_after is not None and stop_after(payload):
+                return
             if cont_yn.upper() != "Y":
                 return
             if page_no == page_limit:
