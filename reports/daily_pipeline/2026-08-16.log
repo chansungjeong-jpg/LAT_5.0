@@ -1,0 +1,43 @@
+=== run started_at=2026-08-16T12:07:49 ===
+$ C:\Users\User\AppData\Local\Programs\Python\Python313\python.exe -m lat5.cli data-health --db C:\trading_system\LAT_5.0\data\lat5_market.db --watchlist C:\trading_system\LAT_5.0\LAT_SIMPLE_v1.0_Watchlist.md --output-dir C:\trading_system\LAT_5.0
+C:\Users\User\AppData\Local\Programs\Python\Python313\python.exe: Error while finding module specification for 'lat5.cli' (ModuleNotFoundError: No module named 'lat5')
+=== run result=BLOCKED command_exit=1 ===
+=== run started_at=2026-08-16T12:07:56 ===
+$ C:\Users\User\AppData\Local\Programs\Python\Python313\python.exe -m lat5.cli data-health --db C:\trading_system\LAT_5.0\data\lat5_market.db --watchlist C:\trading_system\LAT_5.0\LAT_SIMPLE_v1.0_Watchlist.md --output-dir C:\trading_system\LAT_5.0
+{"status": "PASS", "json": "C:\\trading_system\\LAT_5.0\\artifacts\\data_health_latest.json", "report": "C:\\trading_system\\LAT_5.0\\reports\\data_health_latest.md"}
+$ C:\Users\User\AppData\Local\Programs\Python\Python313\python.exe C:\trading_system\LAT_5.0\scripts\filter_monthly10_weekly5.py --db C:\trading_system\LAT_5.0\data\lat5_market.db --watchlist C:\trading_system\LAT_5.0\LAT_SIMPLE_v1.0_Watchlist.md --as-of 2026-08-16
+output=C:\trading_system\LAT_5.0\reports\monthly_weekly_filter\2026-08-16.md
+as_of=2026-08-16 universe=154 matches=29
+240810	원익IPS
+084370	유진테크
+140860	파크시스템스
+039030	이오테크닉스
+089030	테크윙
+000150	두산
+006400	삼성SDI
+204320	HL만도
+307950	현대오토에버
+012450	한화에어로스페이스
+196170	알테오젠
+011780	금호석유
+298040	효성중공업
+267270	HD현대건설기계
+241560	두산밥캣
+006260	LS
+047040	대우건설
+044490	태웅
+108490	로보티즈
+058610	에스피지
+319400	현대무벡스
+064400	LG CNS
+327260	RF머트리얼즈
+138080	오이솔루션
+064760	티씨케이
+067310	하나마이크론
+330860	네패스아크
+102710	이엔에프테크놀로지
+010060	OCI홀딩스
+$ C:\Users\User\AppData\Local\Programs\Python\Python313\python.exe C:\trading_system\LAT_5.0\scripts\scan_trendline_rank.py --db C:\trading_system\LAT_5.0\data\lat5_market.db --watchlist C:\trading_system\LAT_5.0\LAT_SIMPLE_v1.0_Watchlist.md --as-of 2026-08-16
+output=C:\trading_system\LAT_5.0\reports\trendline_rank\2026-08-16.md
+signals=0 selected=0
+=== run result=COMPLETE ===
