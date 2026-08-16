@@ -1,0 +1,235 @@
+﻿# Review package: 655b1b0..7866790
+
+## Commits
+7866790 feat: add daily moving average reaction contract
+
+## Files changed
+ .../sdd/daily-ma-reaction-score/task-1-report.md   | 45 ++++++++++
+ src/lat5/daily_ma_reaction.py                      | 99 ++++++++++++++++++++++
+ tests/test_daily_ma_reaction.py                    | 61 +++++++++++++
+ 3 files changed, 205 insertions(+)
+
+## Diff
+diff --git a/.superpowers/sdd/daily-ma-reaction-score/task-1-report.md b/.superpowers/sdd/daily-ma-reaction-score/task-1-report.md
+new file mode 100644
+index 0000000..811ecca
+--- /dev/null
++++ b/.superpowers/sdd/daily-ma-reaction-score/task-1-report.md
+@@ -0,0 +1,45 @@
++# Task 1 구현 보고서
++
++## 구현 범위
++
++completed daily bar만 `daily.index <= as_of`로 필터링해 SMA5·SMA20·SMA60을 계산하는 순수 데이터 계약을 추가했다.
++
++- `DailyMAReactionInputs`: 일봉 DataFrame과 평가 시점 계약
++- `DailyMAReaction`: 반응명, 기본 점수, 품질 보너스, 총점, SMA 값, 상태, 사유, unknown fields
++- 필수 OHLCV 컬럼 또는 SMA 기간이 부족하면 `UNKNOWN`과 누락 필드를 반환
++- 주문·알림·스케줄러 및 기존 통합 경로는 변경하지 않음
++
++## 변경 파일
++
++- `src/lat5/daily_ma_reaction.py`
++- `tests/test_daily_ma_reaction.py`
++- `.superpowers/sdd/daily-ma-reaction-score/task-1-report.md`
++
++## TDD 및 검증 결과
++
++### RED
++
++실패 테스트를 먼저 실행했다.
++
++```text
++python -m pytest tests/test_daily_ma_reaction.py -q
++ModuleNotFoundError: No module named 'lat5.daily_ma_reaction'
++```
++
++### GREEN
++
++최소 구현 후 focused 테스트가 통과했다.
++
++```text
++python -m pytest tests/test_daily_ma_reaction.py -q
++4 passed
++```
++
++### 전체 회귀
++
++```text
++python -m pytest -q
++152 passed
++```
++
++Task 2 이후 범위인 SMA 반응 감지, ATR 기반 품질 보너스, golden-cross 보너스, 기존 scorer 통합은 구현하지 않았다.
+diff --git a/src/lat5/daily_ma_reaction.py b/src/lat5/daily_ma_reaction.py
+new file mode 100644
+index 0000000..f22c0ec
+--- /dev/null
++++ b/src/lat5/daily_ma_reaction.py
+@@ -0,0 +1,99 @@
++from __future__ import annotations
++
++from dataclasses import dataclass
++
++import pandas as pd
++
++
++@dataclass(frozen=True)
++class DailyMAReactionInputs:
++    daily: pd.DataFrame
++    as_of: pd.Timestamp
++
++
++@dataclass(frozen=True)
++class DailyMAReaction:
++    reaction: str
++    base_score: int
++    quality_bonus: int
++    total_score: int
++    sma5: float | None
++    sma20: float | None
++    sma60: float | None
++    status: str
++    reasons: tuple[str, ...]
++    unknown_fields: tuple[str, ...]
++
++
++def _sma(close: pd.Series, window: int) -> float | None:
++    values = close.tail(window)
++    if len(values) < window or values.isna().any():
++        return None
++    return float(values.mean())
++
++
++def _unknown_result(
++    *,
++    sma5: float | None,
++    sma20: float | None,
++    sma60: float | None,
++    unknown_fields: list[str],
++) -> DailyMAReaction:
++    return DailyMAReaction(
++        reaction="UNKNOWN",
++        base_score=0,
++        quality_bonus=0,
++        total_score=0,
++        sma5=sma5,
++        sma20=sma20,
++        sma60=sma60,
++        status="UNKNOWN",
++        reasons=("REQUIRED_DATA_UNKNOWN",),
++        unknown_fields=tuple(unknown_fields),
++    )
++
++
++def score_daily_reaction(
++    daily: pd.DataFrame, as_of: pd.Timestamp
++) -> DailyMAReaction:
++    DailyMAReactionInputs(daily=daily, as_of=as_of)
++    required = ("open", "high", "low", "close", "volume")
++    missing = [column for column in required if column not in daily.columns]
++    if missing:
++        return _unknown_result(
++            sma5=None,
++            sma20=None,
++            sma60=None,
++            unknown_fields=missing,
++        )
++
++    completed = daily.loc[daily.index <= as_of]
++    close = completed["close"]
++    sma5 = _sma(close, 5)
++    sma20 = _sma(close, 20)
++    sma60 = _sma(close, 60)
++    unknown_fields = [
++        name
++        for name, value in (("SMA5", sma5), ("SMA20", sma20), ("SMA60", sma60))
++        if value is None
++    ]
++    if unknown_fields:
++        return _unknown_result(
++            sma5=sma5,
++            sma20=sma20,
++            sma60=sma60,
++            unknown_fields=unknown_fields,
++        )
++
++    return DailyMAReaction(
++        reaction="NONE",
++        base_score=0,
++        quality_bonus=0,
++        total_score=0,
++        sma5=sma5,
++        sma20=sma20,
++        sma60=sma60,
++        status="KNOWN",
++        reasons=(),
++        unknown_fields=(),
++    )
+diff --git a/tests/test_daily_ma_reaction.py b/tests/test_daily_ma_reaction.py
+new file mode 100644
+index 0000000..ddc6655
+--- /dev/null
++++ b/tests/test_daily_ma_reaction.py
+@@ -0,0 +1,61 @@
++import pandas as pd
++import pytest
++
++from lat5.daily_ma_reaction import (
++    DailyMAReactionInputs,
++    score_daily_reaction,
++)
++
++
++def frame_with_bars(count: int = 70) -> pd.DataFrame:
++    index = pd.date_range("2026-06-04", periods=count, freq="D")
++    close = pd.Series(range(100, 100 + count), index=index, dtype=float)
++    return pd.DataFrame(
++        {
++            "open": close - 1.0,
++            "high": close + 1.0,
++            "low": close - 2.0,
++            "close": close,
++            "volume": 1_000.0,
++        },
++        index=index,
++    )
++
++
++def test_daily_ma_reaction_inputs_are_public_contract_dataclass():
++    frame = frame_with_bars()
++    inputs = DailyMAReactionInputs(frame, frame.index[-1])
++
++    assert inputs.daily is frame
++    assert inputs.as_of == frame.index[-1]
++
++
++def test_reaction_requires_at_least_sixty_completed_daily_bars():
++    short_frame = frame_with_bars(20)
++
++    result = score_daily_reaction(short_frame, as_of=short_frame.index[-1])
++
++    assert result.status == "UNKNOWN"
++    assert "SMA60" in result.unknown_fields
++
++
++def test_sma_values_use_only_rows_before_as_of():
++    frame = frame_with_bars()
++    as_of = pd.Timestamp("2026-08-12")
++    frame.loc[pd.Timestamp("2026-08-13"), "close"] = 10_000.0
++
++    result = score_daily_reaction(frame, as_of=as_of)
++
++    expected = frame.loc[frame.index <= as_of, "close"]
++    assert result.sma5 == pytest.approx(expected.tail(5).mean())
++    assert result.sma20 == pytest.approx(expected.tail(20).mean())
++    assert result.sma60 == pytest.approx(expected.tail(60).mean())
++
++
++def test_reaction_marks_missing_ohlcv_columns_unknown():
++    frame = frame_with_bars().drop(columns="volume")
++
++    result = score_daily_reaction(frame, as_of=frame.index[-1])
++
++    assert result.status == "UNKNOWN"
++    assert "volume" in result.unknown_fields

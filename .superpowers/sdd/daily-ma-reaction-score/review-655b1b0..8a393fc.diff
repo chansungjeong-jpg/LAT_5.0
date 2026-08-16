@@ -1,0 +1,442 @@
+﻿# Review package: 655b1b0..8a393fc
+
+## Diff
+diff --git a/.superpowers/sdd/daily-ma-reaction-score/task-1-report.md b/.superpowers/sdd/daily-ma-reaction-score/task-1-report.md
+new file mode 100644
+index 0000000..6916ef6
+--- /dev/null
++++ b/.superpowers/sdd/daily-ma-reaction-score/task-1-report.md
+@@ -0,0 +1,108 @@
++# Task 1 구현 보고서
++
++## 구현 범위
++
++completed daily bar만 `daily.index.normalize() < as_of.normalize()`로 필터링해 SMA5·SMA20·SMA60을 계산하는 순수 데이터 계약을 추가했다. `as_of`와 같은 날짜의 bar는 장중 partial 가능성이 있으므로 전체 제외한다.
++
++- `DailyMAReactionInputs`: 일봉 DataFrame과 평가 시점 계약
++- `DailyMAReaction`: 반응명, 기본 점수, 품질 보너스, 총점, SMA 값, 상태, 사유, unknown fields
++- 필수 OHLCV 컬럼 또는 SMA 기간이 부족하면 `UNKNOWN`과 누락 필드를 반환
++- 주문·알림·스케줄러 및 기존 통합 경로는 변경하지 않음
++
++## 변경 파일
++
++- `src/lat5/daily_ma_reaction.py`
++- `tests/test_daily_ma_reaction.py`
++- `.superpowers/sdd/daily-ma-reaction-score/task-1-report.md`
++
++## TDD 및 검증 결과
++
++### RED
++
++실패 테스트를 먼저 실행했다.
++
++```text
++python -m pytest tests/test_daily_ma_reaction.py -q
++ModuleNotFoundError: No module named 'lat5.daily_ma_reaction'
++```
++
++### GREEN
++
++최소 구현 후 focused 테스트가 통과했다.
++
++```text
++python -m pytest tests/test_daily_ma_reaction.py -q
++4 passed
++```
++
++### 전체 회귀
++
++```text
++python -m pytest -q
++152 passed
++```
++
++Task 2 이후 범위인 SMA 반응 감지, ATR 기반 품질 보너스, golden-cross 보너스, 기존 scorer 통합은 구현하지 않았다.
++## Reviewer follow-up
++
++- The planned public API is now `score_daily_ma_reaction`. The original `score_daily_reaction` name remains as a compatibility alias.
++- Completed-bar semantics are fail-closed and date-based: only rows whose normalized bar date is strictly earlier than `as_of.normalize()` are used. The entire `as_of` calendar date is excluded, including a same-day intraday partial bar.
++- Every completed OHLCV field (`open`, `high`, `low`, `close`, `volume`) is converted to numeric and checked for finite values. Missing, non-numeric, `NaN`, and infinite values return `UNKNOWN` and include the affected field names in `unknown_fields`.
++- Inputs must have a monotonic increasing `DatetimeIndex` without `NaT`. Non-datetime or unsorted indexes fail closed with `datetime_index` in `unknown_fields`.
++
++### Reviewer follow-up TDD and regression results
++
++RED after adding the review regression tests:
++
++```text
++python -m pytest tests/test_daily_ma_reaction.py -q
++ImportError: cannot import name `score_daily_ma_reaction`
++```
++
++GREEN after the minimal contract hardening:
++
++```text
++python -m pytest tests/test_daily_ma_reaction.py -q
++23 passed
++```
++
++Full regression:
++
++```text
++python -m pytest -q
++171 passed
++```
++## Duplicate daily-bar follow-up
++
++- The completed subset must be unique at calendar-day granularity. After excluding the full `as_of` date, any remaining exact duplicate timestamp or multiple timestamps on one date returns `UNKNOWN` with `datetime_index` in `unknown_fields`.
++- A same-day partial bar on the excluded `as_of` date does not trigger the duplicate check because it is outside the completed subset.
++
++### Duplicate-bar verification
++
++RED after adding duplicate-date and duplicate-timestamp tests:
++
++```text
++python -m pytest tests/test_daily_ma_reaction.py -q
++2 failed, 23 passed
++```
++
++GREEN after the minimal duplicate-date guard:
++
++```text
++python -m pytest tests/test_daily_ma_reaction.py -q
++25 passed
++```
++
++Final compile check:
++
++```text
++python -m compileall -q src tests
++exit 0
++```
++
++Final full regression:
++
++```text
++python -m pytest -q
++173 passed
++```
+diff --git a/src/lat5/daily_ma_reaction.py b/src/lat5/daily_ma_reaction.py
+new file mode 100644
+index 0000000..963aff4
+--- /dev/null
++++ b/src/lat5/daily_ma_reaction.py
+@@ -0,0 +1,171 @@
++from __future__ import annotations
++
++from dataclasses import dataclass
++from math import isfinite
++
++import pandas as pd
++
++
++_REQUIRED_COLUMNS = ("open", "high", "low", "close", "volume")
++
++
++@dataclass(frozen=True)
++class DailyMAReactionInputs:
++    """Completed daily bars and the beginning of the evaluation date."""
++
++    daily: pd.DataFrame
++    as_of: pd.Timestamp
++
++
++@dataclass(frozen=True)
++class DailyMAReaction:
++    reaction: str
++    base_score: int
++    quality_bonus: int
++    total_score: int
++    sma5: float | None
++    sma20: float | None
++    sma60: float | None
++    status: str
++    reasons: tuple[str, ...]
++    unknown_fields: tuple[str, ...]
++
++
++def _sma(close: pd.Series, window: int) -> float | None:
++    values = close.tail(window)
++    if len(values) < window or values.isna().any():
++        return None
++    return float(values.mean())
++
++
++def _unknown_result(
++    *,
++    sma5: float | None,
++    sma20: float | None,
++    sma60: float | None,
++    unknown_fields: list[str],
++) -> DailyMAReaction:
++    return DailyMAReaction(
++        reaction="UNKNOWN",
++        base_score=0,
++        quality_bonus=0,
++        total_score=0,
++        sma5=sma5,
++        sma20=sma20,
++        sma60=sma60,
++        status="UNKNOWN",
++        reasons=("REQUIRED_DATA_UNKNOWN",),
++        unknown_fields=tuple(unknown_fields),
++    )
++
++
++def _completed_bars(
++    daily: pd.DataFrame, as_of: pd.Timestamp
++) -> tuple[pd.DataFrame | None, tuple[str, ...]]:
++    if not isinstance(daily.index, pd.DatetimeIndex):
++        return None, ("datetime_index",)
++    if daily.index.hasnans or not daily.index.is_monotonic_increasing:
++        return None, ("datetime_index",)
++
++    try:
++        evaluation_date = pd.Timestamp(as_of)
++        if pd.isna(evaluation_date):
++            return None, ("as_of",)
++        completed = daily.loc[
++            daily.index.normalize() < evaluation_date.normalize()
++        ]
++        if completed.index.normalize().duplicated().any():
++            return None, ("datetime_index",)
++    except (TypeError, ValueError):
++        return None, ("datetime_index",)
++    return completed, ()
++
++
++def _validated_ohlcv(
++    completed: pd.DataFrame,
++) -> tuple[pd.DataFrame, tuple[str, ...]]:
++    validated = pd.DataFrame(index=completed.index)
++    invalid_fields: list[str] = []
++    for field in _REQUIRED_COLUMNS:
++        values = pd.to_numeric(completed[field], errors="coerce")
++        finite = values.map(
++            lambda value: pd.notna(value) and isfinite(float(value))
++        )
++        if not bool(finite.all()):
++            invalid_fields.append(field)
++        validated[field] = values
++    return validated, tuple(invalid_fields)
++
++
++def score_daily_ma_reaction(
++    daily: pd.DataFrame, as_of: pd.Timestamp
++) -> DailyMAReaction:
++    DailyMAReactionInputs(daily=daily, as_of=as_of)
++    missing = [column for column in _REQUIRED_COLUMNS if column not in daily.columns]
++    if missing:
++        return _unknown_result(
++            sma5=None,
++            sma20=None,
++            sma60=None,
++            unknown_fields=missing,
++        )
++
++    completed, index_unknown = _completed_bars(daily, as_of)
++    if index_unknown:
++        return _unknown_result(
++            sma5=None,
++            sma20=None,
++            sma60=None,
++            unknown_fields=list(index_unknown),
++        )
++
++    assert completed is not None
++    validated, invalid_fields = _validated_ohlcv(completed)
++    if invalid_fields:
++        return _unknown_result(
++            sma5=None,
++            sma20=None,
++            sma60=None,
++            unknown_fields=list(invalid_fields),
++        )
++
++    close = validated["close"]
++    sma5 = _sma(close, 5)
++    sma20 = _sma(close, 20)
++    sma60 = _sma(close, 60)
++    unknown_fields = [
++        name
++        for name, value in (("SMA5", sma5), ("SMA20", sma20), ("SMA60", sma60))
++        if value is None
++    ]
++    if unknown_fields:
++        return _unknown_result(
++            sma5=sma5,
++            sma20=sma20,
++            sma60=sma60,
++            unknown_fields=unknown_fields,
++        )
++
++    return DailyMAReaction(
++        reaction="NONE",
++        base_score=0,
++        quality_bonus=0,
++        total_score=0,
++        sma5=sma5,
++        sma20=sma20,
++        sma60=sma60,
++        status="KNOWN",
++        reasons=(),
++        unknown_fields=(),
++    )
++
++
++score_daily_reaction = score_daily_ma_reaction
++
++
++__all__ = [
++    "DailyMAReactionInputs",
++    "DailyMAReaction",
++    "score_daily_ma_reaction",
++    "score_daily_reaction",
++]
+diff --git a/tests/test_daily_ma_reaction.py b/tests/test_daily_ma_reaction.py
+new file mode 100644
+index 0000000..4028cf9
+--- /dev/null
++++ b/tests/test_daily_ma_reaction.py
+@@ -0,0 +1,142 @@
++import pandas as pd
++import pytest
++
++from lat5.daily_ma_reaction import (
++    DailyMAReactionInputs,
++    score_daily_ma_reaction,
++    score_daily_reaction,
++)
++
++
++def frame_with_bars(count: int = 70) -> pd.DataFrame:
++    index = pd.date_range("2026-06-04", periods=count, freq="D")
++    close = pd.Series(range(100, 100 + count), index=index, dtype=float)
++    return pd.DataFrame(
++        {
++            "open": close - 1.0,
++            "high": close + 1.0,
++            "low": close - 2.0,
++            "close": close,
++            "volume": 1_000.0,
++        },
++        index=index,
++    )
++
++
++def test_daily_ma_reaction_inputs_are_public_contract_dataclass():
++    frame = frame_with_bars()
++    inputs = DailyMAReactionInputs(frame, frame.index[-1])
++
++    assert inputs.daily is frame
++    assert inputs.as_of == frame.index[-1]
++
++
++def test_reaction_requires_at_least_sixty_completed_daily_bars():
++    short_frame = frame_with_bars(20)
++
++    result = score_daily_reaction(short_frame, as_of=short_frame.index[-1])
++
++    assert result.status == "UNKNOWN"
++    assert "SMA60" in result.unknown_fields
++
++
++def test_plan_public_api_is_available_and_legacy_name_is_compatibility_alias():
++    frame = frame_with_bars()
++    as_of = frame.index[-1] + pd.Timedelta(days=1)
++
++    canonical = score_daily_ma_reaction(frame, as_of=as_of)
++    legacy = score_daily_reaction(frame, as_of=as_of)
++
++    assert canonical == legacy
++    assert score_daily_reaction is score_daily_ma_reaction
++
++
++def test_sma_values_use_only_completed_dates_before_as_of():
++    frame = frame_with_bars()
++    as_of = pd.Timestamp("2026-08-12 10:00")
++    frame.loc[as_of, "close"] = 10_000.0
++
++    result = score_daily_ma_reaction(frame, as_of=as_of)
++
++    expected = frame.loc[frame.index.normalize() < as_of.normalize(), "close"]
++    assert result.status == "KNOWN"
++    assert result.sma5 == pytest.approx(expected.tail(5).mean())
++    assert result.sma20 == pytest.approx(expected.tail(20).mean())
++    assert result.sma60 == pytest.approx(expected.tail(60).mean())
++
++
++def test_reaction_marks_missing_ohlcv_column_unknown():
++    frame = frame_with_bars().drop(columns="volume")
++
++    result = score_daily_ma_reaction(frame, as_of=frame.index[-1])
++
++    assert result.status == "UNKNOWN"
++    assert "volume" in result.unknown_fields
++
++
++@pytest.mark.parametrize("field", ["open", "high", "low", "close", "volume"])
++@pytest.mark.parametrize("bad_value", [None, float("nan"), float("inf")])
++def test_reaction_rejects_non_finite_completed_ohlcv_values(field, bad_value):
++    frame = frame_with_bars()
++    frame.loc[frame.index[-1], field] = bad_value
++    as_of = frame.index[-1] + pd.Timedelta(days=1)
++
++    result = score_daily_ma_reaction(frame, as_of=as_of)
++
++    assert result.status == "UNKNOWN"
++    assert field in result.unknown_fields
++
++
++def test_future_non_finite_ohlcv_values_are_outside_the_validation_window():
++    frame = frame_with_bars()
++    future = frame.index[-1] + pd.Timedelta(days=1)
++    frame.loc[future, "volume"] = float("inf")
++
++    result = score_daily_ma_reaction(frame, as_of=future)
++
++    assert result.status == "KNOWN"
++    assert result.sma60 is not None
++    assert "volume" not in result.unknown_fields
++
++
++def test_reaction_fails_closed_for_non_datetime_index():
++    frame = frame_with_bars()
++    frame.index = range(len(frame))
++
++    result = score_daily_ma_reaction(frame, as_of=pd.Timestamp("2026-08-13"))
++
++    assert result.status == "UNKNOWN"
++    assert "datetime_index" in result.unknown_fields
++
++
++def test_reaction_fails_closed_for_unsorted_datetime_index():
++    frame = frame_with_bars().iloc[::-1]
++
++    result = score_daily_ma_reaction(frame, as_of=pd.Timestamp("2026-08-13"))
++
++    assert result.status == "UNKNOWN"
++    assert "datetime_index" in result.unknown_fields
++
++
++def test_reaction_fails_closed_for_multiple_timestamps_on_one_date():
++    frame = frame_with_bars()
++    same_day = frame.index[-1] + pd.Timedelta(hours=12)
++    frame.loc[same_day] = frame.iloc[-1]
++
++    result = score_daily_ma_reaction(
++        frame, as_of=frame.index[-1] + pd.Timedelta(days=1)
++    )
++
++    assert result.status == "UNKNOWN"
++    assert "datetime_index" in result.unknown_fields
++
++
++def test_reaction_fails_closed_for_duplicate_daily_timestamp():
++    frame = pd.concat([frame_with_bars(), frame_with_bars().iloc[[-1]]])
++
++    result = score_daily_ma_reaction(
++        frame, as_of=frame.index[-1] + pd.Timedelta(days=1)
++    )
++
++    assert result.status == "UNKNOWN"
++    assert "datetime_index" in result.unknown_fields

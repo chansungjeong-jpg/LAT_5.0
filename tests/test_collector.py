@@ -106,7 +106,7 @@ class FakeClient:
         self.calls = []
 
     def post_pages(self, api_id, path, body, *, stop_after=None):
-        self.calls.append((api_id, path, body))
+        self.calls.append((api_id, path, body, stop_after))
         value = self.payloads[api_id]
         if isinstance(value, Exception):
             raise value
@@ -169,6 +169,44 @@ def test_collect_symbol_propagates_token_error_to_block_entire_run():
 
     with pytest.raises(KiwoomTokenError):
         collect_symbol(client, EventStore(), 7, "005930", base_date="20260808")
+
+
+def test_parse_daily_rejects_invalid_ohlc_order():
+    with pytest.raises(SchemaMismatch, match="invalid OHLC"):
+        parse_daily(
+            "000720",
+            {
+                "stk_dt_pole_chart_qry": [
+                    {
+                        "dt": "19860329",
+                        "open_pric": "521487",
+                        "high_pric": "478428",
+                        "low_pric": "507134",
+                        "cur_prc": "526271",
+                        "trde_qty": "559",
+                    }
+                ]
+            },
+        )
+
+
+def test_collect_symbol_bounds_daily_pagination_to_two_year_history():
+    client = FakeClient(
+        {
+            "ka10081": {"stk_dt_pole_chart_qry": []},
+            "ka10080": {"stk_min_pole_chart_qry": []},
+            "ka10046": {"cntr_str_tm": []},
+            "ka10059": {"stk_invsr_orgn": []},
+        }
+    )
+
+    collect_symbol(client, EventStore(), 7, "000720", base_date="20260816")
+
+    daily_call = next(call for call in client.calls if call[0] == "ka10081")
+    stop_after = daily_call[3]
+    assert stop_after is not None
+    assert stop_after({"stk_dt_pole_chart_qry": [{"dt": "19860329"}]}) is True
+    assert stop_after({"stk_dt_pole_chart_qry": [{"dt": "20260101"}]}) is False
 
 
 def test_collect_watchlist_deduplicates_tickers_and_aggregates_symbol_results():

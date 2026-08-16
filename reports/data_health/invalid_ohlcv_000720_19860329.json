@@ -1,0 +1,11 @@
+{
+  "provider": "kiwoom",
+  "ticker": "000720",
+  "date": "1986-03-29",
+  "open": 521487.0,
+  "high": 478428.0,
+  "low": 507134.0,
+  "close": 526271.0,
+  "reason": "high < low; source response reproduced the same invalid OHLC row during collection run 10",
+  "collection_run_id": 10
+}

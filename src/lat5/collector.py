@@ -41,18 +41,29 @@ def _datetime(value: Any) -> str:
         raise SchemaMismatch(f"invalid datetime: {value!r}") from exc
 
 
+def _validate_ohlc(open_: float, high: float, low: float, close: float) -> None:
+    if min(open_, high, low, close) <= 0 or high < low:
+        raise SchemaMismatch(
+            f"invalid OHLC: open={open_}, high={high}, low={low}, close={close}"
+        )
+
+
 def parse_daily(ticker: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
     parsed = []
     for row in _rows(payload, "stk_dt_pole_chart_qry"):
         close = _number(row.get("cur_prc"), absolute=True)
+        open_ = _number(row.get("open_pric"), absolute=True)
+        high = _number(row.get("high_pric"), absolute=True)
+        low = _number(row.get("low_pric"), absolute=True)
+        _validate_ohlc(open_, high, low, close)
         volume = int(_number(row.get("trde_qty"), absolute=True))
         parsed.append(
             {
                 "ticker": ticker,
                 "date": _date(row.get("dt")),
-                "open": _number(row.get("open_pric"), absolute=True),
-                "high": _number(row.get("high_pric"), absolute=True),
-                "low": _number(row.get("low_pric"), absolute=True),
+                "open": open_,
+                "high": high,
+                "low": low,
                 "close": close,
                 "volume": volume,
                 "amount": close * volume,
@@ -67,15 +78,19 @@ def parse_minutes(
     parsed = []
     for row in _rows(payload, "stk_min_pole_chart_qry"):
         close = _number(row.get("cur_prc"), absolute=True)
+        open_ = _number(row.get("open_pric"), absolute=True)
+        high = _number(row.get("high_pric"), absolute=True)
+        low = _number(row.get("low_pric"), absolute=True)
+        _validate_ohlc(open_, high, low, close)
         volume = int(_number(row.get("trde_qty"), absolute=True))
         parsed.append(
             {
                 "ticker": ticker,
                 "datetime": _datetime(row.get("cntr_tm")),
                 "interval": interval,
-                "open": _number(row.get("open_pric"), absolute=True),
-                "high": _number(row.get("high_pric"), absolute=True),
-                "low": _number(row.get("low_pric"), absolute=True),
+                "open": open_,
+                "high": high,
+                "low": low,
                 "close": close,
                 "volume": volume,
                 "amount": close * volume,
@@ -127,6 +142,9 @@ def collect_symbol(
     flow_cutoff = (
         datetime.strptime(base_date, "%Y%m%d").date() - timedelta(days=365)
     ).isoformat()
+    daily_cutoff = (
+        datetime.strptime(base_date, "%Y%m%d").date() - timedelta(days=730)
+    ).isoformat()
 
     def stop_foreign_flow(payload: dict[str, Any]) -> bool:
         rows = payload.get("stk_invsr_orgn")
@@ -134,6 +152,13 @@ def collect_symbol(
             return False
         dates = [str(row.get("dt")) for row in rows if isinstance(row, dict)]
         return bool(dates) and max(dates) < flow_cutoff.replace("-", "")
+
+    def stop_daily(payload: dict[str, Any]) -> bool:
+        rows = payload.get("stk_dt_pole_chart_qry")
+        if not isinstance(rows, list) or not rows:
+            return False
+        dates = [str(row.get("dt")) for row in rows if isinstance(row, dict)]
+        return bool(dates) and max(dates) < daily_cutoff.replace("-", "")
 
     requests: list[tuple[str, str, dict[str, str], Callable]] = [
         (
@@ -172,7 +197,12 @@ def collect_symbol(
     result = {"success": 0, "errors": 0}
     for api_id, path, body, save in requests:
         try:
-            stop_after = stop_foreign_flow if api_id == "ka10059" else None
+            if api_id == "ka10059":
+                stop_after = stop_foreign_flow
+            elif api_id == "ka10081":
+                stop_after = stop_daily
+            else:
+                stop_after = None
             pages = (
                 client.post_pages(api_id, path, body, stop_after=stop_after)
                 if stop_after is not None

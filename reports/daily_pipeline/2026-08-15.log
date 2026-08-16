@@ -1,0 +1,2 @@
+$ C:\Users\User\AppData\Local\Programs\Python\Python313\python.exe -m lat5.cli data-health --db C:\trading_system\LAT_5.0\data\lat5_market.db --watchlist C:\trading_system\LAT_5.0\LAT_SIMPLE_v1.0_Watchlist.md --output-dir C:\trading_system\LAT_5.0
+{"status": "FAIL", "json": "C:\\trading_system\\LAT_5.0\\artifacts\\data_health_latest.json", "report": "C:\\trading_system\\LAT_5.0\\reports\\data_health_latest.md"}

@@ -37,7 +37,8 @@ def build_data_health(db_path: str | Path, items: Iterable[WatchItem]) -> dict[s
         strength, strength_latest = _coverage(conn, "execution_strength", symbols)
         latest_run = (
             conn.execute(
-                "SELECT run_id, status FROM collection_runs ORDER BY run_id DESC LIMIT 1"
+                "SELECT run_id, status, watchlist_count, success_count, error_count "
+                "FROM collection_runs ORDER BY run_id DESC LIMIT 1"
             ).fetchone()
             if _table_exists(conn, "collection_runs")
             else None
@@ -49,9 +50,33 @@ def build_data_health(db_path: str | Path, items: Iterable[WatchItem]) -> dict[s
                 (latest_run[0],),
             ).fetchone()
             latest_error = error_row[0] if error_row else None
+        invalid_ohlcv = 0
+        for table in ("ohlcv_daily", "ohlcv_minute"):
+            if not _table_exists(conn, table):
+                continue
+            interval_clause = " AND interval='5'" if table == "ohlcv_minute" else ""
+            invalid_ohlcv += int(
+                conn.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE provider='kiwoom'"
+                    f"{interval_clause} AND (open<=0 OR high<=0 OR low<=0 OR close<=0 OR high<low)"
+                ).fetchone()[0]
+            )
+        sqlite_ok = conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     finally:
         conn.close()
     total = len(symbols)
+    latest_run_id = latest_run[0] if latest_run else None
+    latest_run_status = latest_run[1] if latest_run else None
+    latest_run_watchlist = int(latest_run[2]) if latest_run else 0
+    latest_run_success = int(latest_run[3]) if latest_run else 0
+    latest_run_errors = int(latest_run[4]) if latest_run else 0
+    latest_scope_ok = bool(
+        latest_run
+        and latest_run_watchlist >= total
+        and latest_run_success >= total
+        and latest_run_errors == 0
+    )
+    latest_complete = bool(latest_run and latest_run_status == "COMPLETE" and latest_scope_ok)
 
     def pct(value: int) -> float:
         return round(value * 100 / total, 2) if total else 0.0
@@ -69,17 +94,27 @@ def build_data_health(db_path: str | Path, items: Iterable[WatchItem]) -> dict[s
         "foreign_flow_latest": flow_latest,
         "strength_symbols": strength,
         "strength_schema_ok": strength > 0,
+        "strength_coverage_pct": pct(strength),
         "strength_latest": strength_latest,
-        "latest_collection_run_id": latest_run[0] if latest_run else None,
-        "latest_collection_status": latest_run[1] if latest_run else None,
+        "latest_collection_run_id": latest_run_id,
+        "latest_collection_status": latest_run_status,
+        "latest_collection_watchlist_count": latest_run_watchlist,
+        "latest_collection_success_count": latest_run_success,
+        "latest_collection_error_count": latest_run_errors,
+        "latest_collection_scope_ok": latest_scope_ok,
         "latest_collection_error": latest_error,
+        "latest_collection_complete": latest_complete,
+        "data_integrity_ok": bool(sqlite_ok and invalid_ohlcv == 0),
+        "invalid_ohlcv_rows": invalid_ohlcv,
     }
     result["status"] = (
         "PASS"
         if result["daily_coverage_pct"] >= 95
         and result["minute_coverage_pct"] >= 90
         and result["foreign_flow_coverage_pct"] >= 90
-        and result["strength_schema_ok"]
+        and result["strength_coverage_pct"] >= 90
+        and result["latest_collection_complete"]
+        and result["data_integrity_ok"]
         else "FAIL"
     )
     return result
@@ -100,12 +135,19 @@ def write_data_health(health: dict[str, object], output_dir: str | Path) -> tupl
         f"Latest collection: `{health['latest_collection_status'] or 'NONE'}`"
         f" (run {health['latest_collection_run_id'] or '-'})\n\n"
         f"Latest error: `{health['latest_collection_error'] or '-'}`\n\n"
+        f"Latest scope: `{health['latest_collection_success_count']}/"
+        f"{health['watchlist_symbols']}` success "
+        f"(run scope={health['latest_collection_watchlist_count']}), "
+        f"errors={health['latest_collection_error_count']}, "
+        f"scope_ok={health['latest_collection_scope_ok']}\n\n"
         "| Dataset | Symbols | Coverage | Latest | Gate |\n"
         "|---|---:|---:|---|---:|\n"
         f"| Daily | {health['daily_symbols']} | {health['daily_coverage_pct']}% | {health['daily_latest'] or '-'} | 95% |\n"
         f"| 5-minute | {health['minute_symbols']} | {health['minute_coverage_pct']}% | {health['minute_latest'] or '-'} | 90% |\n"
         f"| Foreign flow | {health['foreign_flow_symbols']} | {health['foreign_flow_coverage_pct']}% | {health['foreign_flow_latest'] or '-'} | 90% |\n"
-        f"| Execution strength | {health['strength_symbols']} | schema={health['strength_schema_ok']} | {health['strength_latest'] or '-'} | required |\n",
+        f"| Execution strength | {health['strength_symbols']} | schema={health['strength_schema_ok']} | {health['strength_latest'] or '-'} | required |\n"
+        f"\nCollection complete: `{health['latest_collection_complete']}`  \n"
+        f"OHLCV integrity: `{health['data_integrity_ok']}` (invalid rows: {health['invalid_ohlcv_rows']})\n",
         encoding="utf-8",
     )
     return json_path, md_path

@@ -91,3 +91,38 @@ def test_data_health_exposes_latest_collection_blocker(tmp_path):
 
     assert health["latest_collection_status"] == "BLOCKED"
     assert health["latest_collection_error"] == "8005 invalid token"
+
+
+def test_data_health_requires_complete_run_and_reports_strength_coverage(tmp_path):
+    db = tmp_path / "market.db"
+    with CollectorStore(db) as store:
+        run_id = store.start_run(1, datetime(2026, 8, 9, 7, 14, 34))
+        store.finish_run(run_id, "PARTIAL", 1, 1)
+
+    health = build_data_health(db, [WatchItem("005930", "Samsung", "semi")])
+
+    assert health["strength_coverage_pct"] == 0.0
+    assert health["latest_collection_complete"] is False
+    assert health["latest_collection_scope_ok"] is False
+    assert health["data_integrity_ok"] is True
+    assert health["status"] == "FAIL"
+
+
+def test_data_health_does_not_treat_single_ticker_run_as_full_collection(tmp_path):
+    db = tmp_path / "market.db"
+    with CollectorStore(db) as store:
+        run_id = store.start_run(1, datetime(2026, 8, 9, 7, 14, 34))
+        store.finish_run(run_id, "COMPLETE", 1, 0)
+
+    health = build_data_health(
+        db,
+        [
+            WatchItem("005930", "Samsung", "semi"),
+            WatchItem("000660", "SK", "semi"),
+        ],
+    )
+
+    assert health["latest_collection_status"] == "COMPLETE"
+    assert health["latest_collection_scope_ok"] is False
+    assert health["latest_collection_complete"] is False
+    assert health["status"] == "FAIL"
