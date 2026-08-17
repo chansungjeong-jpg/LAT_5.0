@@ -64,6 +64,25 @@ def _daily_sma5_distance_signal(daily: pd.DataFrame) -> tuple[float | None, str,
     return current, trend, score
 
 
+def _daily_volume_score(ratio: float | None) -> int:
+    """Score today's daily volume against the mean of the prior 7 completed
+    daily bars (smart-money inflow proxy) rather than a single day-ago point.
+    """
+    if ratio is None:
+        return 0
+    if ratio < 0.8:
+        return 0
+    if ratio < 1.0:
+        return 5
+    if ratio < 1.2:
+        return 10
+    if ratio < 1.5:
+        return 15
+    if ratio < 2.0:
+        return 20
+    return 30
+
+
 @dataclass(frozen=True)
 class LocationScoreWeights:
     sector_flow: int = 15
@@ -206,6 +225,12 @@ def build_context(
         bull = prior_daily["close"].astype(float) > prior_daily["open"].astype(float)
         ctx["daily_bull_count_5"] = int(bull.iloc[-5:].sum())
         ctx["daily_bull_count_10"] = int(bull.iloc[-10:].sum())
+
+    if len(prior_daily) >= 8:
+        volume = prior_daily["volume"].astype(float)
+        baseline_mean = float(volume.iloc[-8:-1].mean())
+        if baseline_mean > 0:
+            ctx["daily_volume_ratio"] = float(volume.iloc[-1]) / baseline_mean
 
     prior_hourly = (
         hourly.loc[hourly.index + pd.Timedelta(hours=1) <= bar_cutoff]
@@ -454,14 +479,7 @@ def evaluate_watchlist_position(ctx: dict, cfg: LocationScoreConfig) -> dict:
         recent_bullish_score = 0
 
     score_components = {
-        "volume": 10 * sum(
-            bool(ctx.get(field))
-            for field in (
-                "anchor_volume_ok",
-                "pullback_volume_dry",
-                "breakout_volume_ok",
-            )
-        ),
+        "volume": _daily_volume_score(ctx.get("daily_volume_ratio")),
         "m60_location": 20 if ctx.get("m60_trend_ok") is True else 0,
         "daily_ma_reaction": daily_reaction_gate.component,
         "weekly_trend": 10 if ctx.get("weekly_trend_ok") is True else 0,

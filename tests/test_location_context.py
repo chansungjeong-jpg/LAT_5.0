@@ -399,6 +399,38 @@ def _breakout_hourly(periods: int = 30, start: str = "2026-08-01 09:00") -> pd.D
     )
 
 
+def test_daily_volume_ratio_absent_below_eight_prior_rows():
+    daily = _rising_daily(periods=8)  # 7 prior + as_of
+    as_of = daily.index[-1]
+    ctx = build_context(
+        daily=daily,
+        daily_ema=daily_ema_context(daily),
+        hourly=_empty(["open", "high", "low", "close", "volume", "ema60", "ema120"]),
+        minutes=_empty(["open", "high", "low", "close", "volume", "ema20_5m"]),
+        as_of=as_of,
+        cfg=LocationScoreConfig(),
+    )
+    assert "daily_volume_ratio" not in ctx
+
+
+def test_daily_volume_ratio_compares_against_prior_seven_session_average():
+    daily = _rising_daily(periods=9)  # 8 prior + as_of
+    volume_col = daily.columns.get_loc("volume")
+    # 7 completed sessions immediately before the most recent completed one,
+    # averaging 1000; the most recent completed session spikes to 2000.
+    daily.iloc[-2, volume_col] = 2000
+    as_of = daily.index[-1]
+    ctx = build_context(
+        daily=daily,
+        daily_ema=daily_ema_context(daily),
+        hourly=_empty(["open", "high", "low", "close", "volume", "ema60", "ema120"]),
+        minutes=_empty(["open", "high", "low", "close", "volume", "ema20_5m"]),
+        as_of=as_of,
+        cfg=LocationScoreConfig(),
+    )
+    assert ctx["daily_volume_ratio"] == pytest.approx(2.0)
+
+
 def test_no_recent_breakout_gives_pullback_state_none():
     hourly = _breakout_hourly()
     hourly = hourly.assign(high=98.0, close=99.0, volume=100.0)  # wipe out the breakout

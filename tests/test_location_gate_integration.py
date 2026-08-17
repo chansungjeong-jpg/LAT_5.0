@@ -60,6 +60,7 @@ def _entry_gate_context():
         "daily_ema10_distance_pct": 0.05,
         "rr": 2.5,
         "overhead_supply_close": False,
+        "daily_volume_ratio": 2.5,
         "daily_ma_reaction_score": 0,
         "daily_ma_reaction_state": "NONE",
         "daily_ma_reaction": {
@@ -373,8 +374,10 @@ def test_runner_blocks_ineligible_watch_high_from_trade_and_buy_ledger(
     location_ctx = _entry_gate_context()
     if case == "watch_high":
         location_ctx["breakout_volume_ok"] = False
+        location_ctx["daily_volume_ratio"] = 1.7
     elif case in {"no_pullback", "overheated"}:
         location_ctx["breakout_volume_ok"] = False
+        location_ctx["daily_volume_ratio"] = 1.7
         location_ctx[field] = value
     else:
         location_ctx["daily_ma_reaction_score"] = 20

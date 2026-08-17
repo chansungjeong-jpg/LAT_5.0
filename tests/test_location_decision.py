@@ -29,6 +29,7 @@ def _full_pass_ctx() -> dict:
         "daily_ema10_distance_pct": 0.05,
         "rr": 2.5,
         "overhead_supply_close": False,
+        "daily_volume_ratio": 2.5,
         "daily_ma_reaction_score": 0,
         "daily_ma_reaction_state": "NONE",
         "daily_ma_reaction": {
@@ -223,6 +224,7 @@ def test_score_in_watch_high_band():
         "daily_ema10_distance_pct": 0.05,
         "rr": 2.5,
         "overhead_supply_close": False,
+        "daily_volume_ratio": 1.7,
         "daily_ma_reaction_score": 0,
         "daily_ma_reaction_state": "NONE",
     }
@@ -250,6 +252,7 @@ def test_score_in_watch_band():
         "daily_ema10_distance_pct": 0.11,
         "rr": 1.5,
         "overhead_supply_close": True,
+        "daily_volume_ratio": 1.7,
         "daily_ma_reaction_score": 0,
         "daily_ma_reaction_state": "NONE",
     }
@@ -332,6 +335,7 @@ def test_score_70_watch_high_preserves_observation_but_blocks_entry(
 ):
     ctx = _full_pass_ctx()
     ctx["breakout_volume_ok"] = False
+    ctx["daily_volume_ratio"] = 1.7
     ctx[field] = value
 
     result = evaluate_watchlist_position(ctx, LocationScoreConfig())
@@ -465,6 +469,7 @@ def test_strong_daily_reaction_can_promote_watch_high_to_buy_ready():
     ctx["pullback_volume_dry"] = False
     ctx["breakout_volume_ok"] = False
     ctx["bullish_candle_strength_ok"] = False
+    ctx["daily_volume_ratio"] = 1.1
     ctx["daily_ma_reaction_state"] = "SMA60_UPWARD_CROSS_STRONG_BULL"
     ctx["daily_ma_reaction_score"] = 20
 
