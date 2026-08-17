@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from datetime import date, datetime
@@ -7,6 +8,18 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _subprocess_env(root: Path) -> dict[str, str]:
+    """`-m lat5.cli` needs `src` on PYTHONPATH; the Task Scheduler process
+    that launches this script never sets it, so add it explicitly rather
+    than relying on an ambient environment variable.
+    """
+    env = dict(os.environ)
+    src = str(root / "src")
+    existing = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = f"{src}{os.pathsep}{existing}" if existing else src
+    return env
 
 
 def build_pipeline_commands(
@@ -55,9 +68,10 @@ def main() -> int:
     run_started_at = datetime.now().isoformat(timespec="seconds")
     with log_path.open("a", encoding="utf-8") as log:
         log.write(f"=== run started_at={run_started_at} ===\n")
+        env = _subprocess_env(ROOT)
         for command in commands:
             completed = subprocess.run(
-                command, cwd=ROOT, check=False, capture_output=True, text=True
+                command, cwd=ROOT, check=False, capture_output=True, text=True, env=env
             )
             log.write(f"$ {' '.join(command)}\n")
             log.write(completed.stdout or "")

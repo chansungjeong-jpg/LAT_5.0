@@ -1,9 +1,10 @@
+import os
 from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scripts.run_daily_signal_reports import build_pipeline_commands
+from scripts.run_daily_signal_reports import _subprocess_env, build_pipeline_commands
 
 
 def test_daily_pipeline_runs_collection_health_before_selection(tmp_path):
@@ -23,3 +24,18 @@ def test_daily_pipeline_uses_same_database_and_watchlist(tmp_path):
     for command in commands[:2]:
         assert str(tmp_path / "data" / "lat5_market.db") in command
         assert str(tmp_path / "LAT_SIMPLE_v1.0_Watchlist.md") in command
+
+
+def test_subprocess_env_adds_src_to_pythonpath_even_when_unset(monkeypatch, tmp_path):
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    env = _subprocess_env(tmp_path)
+    assert env["PYTHONPATH"] == str(tmp_path / "src")
+
+
+def test_subprocess_env_prepends_src_ahead_of_existing_pythonpath(monkeypatch, tmp_path):
+    monkeypatch.setenv("PYTHONPATH", "/some/other/path")
+    env = _subprocess_env(tmp_path)
+    assert env["PYTHONPATH"].split(os.pathsep) == [
+        str(tmp_path / "src"),
+        "/some/other/path",
+    ]
