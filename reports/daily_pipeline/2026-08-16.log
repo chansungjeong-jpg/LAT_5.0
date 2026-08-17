@@ -41,3 +41,7 @@ $ C:\Users\User\AppData\Local\Programs\Python\Python313\python.exe C:\trading_sy
 output=C:\trading_system\LAT_5.0\reports\trendline_rank\2026-08-16.md
 signals=0 selected=0
 === run result=COMPLETE ===
+=== run started_at=2026-08-16T16:00:01 ===
+$ C:\Users\User\AppData\Local\Programs\Python\Python313\python.exe -m lat5.cli collect --db C:\trading_system\LAT_5.0\data\lat5_market.db --watchlist C:\trading_system\LAT_5.0\LAT_SIMPLE_v1.0_Watchlist.md --env C:\trading_system\LAT_5.0\.env --token-cache C:\trading_system\LAT_5.0\data\kiwoom_token_cache.json --base-date 20260816
+C:\Users\User\AppData\Local\Programs\Python\Python313\python.exe: Error while finding module specification for 'lat5.cli' (ModuleNotFoundError: No module named 'lat5')
+=== run result=BLOCKED command_exit=1 ===
