@@ -26,6 +26,10 @@ class ApiPage:
     next_key: str
 
 
+def _payload_has_rows(payload: dict) -> bool:
+    return any(isinstance(value, list) and value for value in payload.values())
+
+
 class KiwoomClient:
     def __init__(
         self,
@@ -47,6 +51,7 @@ class KiwoomClient:
         self.max_pages_by_api = {
             "ka10080": 100,
             "ka10059": 100,
+            "ka10046": 100,
             **dict(max_pages_by_api or {}),
         }
         self.max_attempts = max_attempts
@@ -110,6 +115,11 @@ class KiwoomClient:
             if stop_after is not None and stop_after(payload):
                 return
             if cont_yn.upper() != "Y":
+                return
+            if not _payload_has_rows(payload):
+                # Some TRs (observed: ka10046) keep answering cont-yn=Y with
+                # empty pages forever once real data is exhausted instead of
+                # switching to N. Trust the data, not the server's flag.
                 return
             if page_no == page_limit:
                 raise KiwoomApiError(f"page limit exceeded for {api_id}: {page_limit}")

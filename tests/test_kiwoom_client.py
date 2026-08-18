@@ -77,7 +77,7 @@ def test_post_pages_never_retries_token_error():
 
 def test_post_pages_fails_when_continuation_exceeds_page_limit():
     session = FakeSession(
-        [FakeResponse({"return_code": 0}, {"cont-yn": "Y", "next-key": "NEXT"})]
+        [FakeResponse({"return_code": 0, "rows": [1]}, {"cont-yn": "Y", "next-key": "NEXT"})]
     )
     client = KiwoomClient(
         _token(),
@@ -95,8 +95,8 @@ def test_post_pages_fails_when_continuation_exceeds_page_limit():
 def test_post_pages_uses_api_specific_page_limit():
     session = FakeSession(
         [
-            FakeResponse({"return_code": 0}, {"cont-yn": "Y", "next-key": "NEXT"}),
-            FakeResponse({"return_code": 0}, {"cont-yn": "N"}),
+            FakeResponse({"return_code": 0, "rows": [1]}, {"cont-yn": "Y", "next-key": "NEXT"}),
+            FakeResponse({"return_code": 0, "rows": [2]}, {"cont-yn": "N"}),
         ]
     )
     client = KiwoomClient(
@@ -111,6 +111,38 @@ def test_post_pages_uses_api_specific_page_limit():
     pages = list(client.post_pages("ka10080", "/api/dostk/chart", {}))
 
     assert [page.page_no for page in pages] == [1, 2]
+
+
+def test_ka10046_defaults_to_extended_page_limit_without_explicit_override():
+    responses = [
+        FakeResponse({"return_code": 0, "rows": [1]}, {"cont-yn": "Y", "next-key": "NEXT"})
+        for _ in range(21)
+    ]
+    responses.append(FakeResponse({"return_code": 0, "rows": [1]}, {"cont-yn": "N"}))
+    session = FakeSession(responses)
+    client = KiwoomClient(_token(), session=session, min_interval=0, sleep=lambda _: None)
+
+    pages = list(client.post_pages("ka10046", "/api/dostk/mrkcond", {}))
+
+    assert len(pages) == 22
+
+
+def test_post_pages_stops_on_empty_page_even_when_cont_yn_still_says_yes():
+    """Regression: 025900/ka10046 (2026-08-18) — Kiwoom kept answering
+    cont-yn=Y with an empty payload long after the real data ran out,
+    burning through the page limit instead of ever returning N."""
+    session = FakeSession(
+        [
+            FakeResponse({"return_code": 0, "rows": [1]}, {"cont-yn": "Y", "next-key": "NEXT"}),
+            FakeResponse({"return_code": 0, "rows": []}, {"cont-yn": "Y", "next-key": "NEXT"}),
+        ]
+    )
+    client = KiwoomClient(_token(), session=session, min_interval=0, sleep=lambda _: None)
+
+    pages = list(client.post_pages("ka10046", "/api/dostk/mrkcond", {}))
+
+    assert [page.page_no for page in pages] == [1, 2]
+    assert len(session.calls) == 2
 
 
 def test_post_pages_can_stop_after_a_sufficient_page():

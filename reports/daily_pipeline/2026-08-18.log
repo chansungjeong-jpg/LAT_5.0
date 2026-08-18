@@ -1,0 +1,34 @@
+=== run started_at=2026-08-18T16:00:01 ===
+$ C:\Users\User\AppData\Local\Programs\Python\Python313\python.exe -m lat5.cli collect --db C:\trading_system\LAT_5.0\data\lat5_market.db --watchlist C:\trading_system\LAT_5.0\LAT_SIMPLE_v1.0_Watchlist.md --env C:\trading_system\LAT_5.0\.env --token-cache C:\trading_system\LAT_5.0\data\kiwoom_token_cache.json --base-date 20260818
+{"status": "BLOCKED", "run_id": 14, "error": "[ka10081] 3: 인증에 실패했습니다[8005:Token이 유효하지 않습니다]"}
+=== run result=BLOCKED command_exit=2 ===
+=== run started_at=2026-08-18T20:07:43 ===
+$ C:\Users\User\AppData\Local\Programs\Python\Python313\python.exe -m lat5.cli data-health --db C:\trading_system\LAT_5.0\data\lat5_market.db --watchlist C:\trading_system\LAT_5.0\LAT_SIMPLE_v1.0_Watchlist.md --output-dir C:\trading_system\LAT_5.0
+{"status": "PASS", "json": "C:\\trading_system\\LAT_5.0\\artifacts\\data_health_latest.json", "report": "C:\\trading_system\\LAT_5.0\\reports\\data_health_latest.md"}
+$ C:\Users\User\AppData\Local\Programs\Python\Python313\python.exe C:\trading_system\LAT_5.0\scripts\filter_monthly10_weekly5.py --db C:\trading_system\LAT_5.0\data\lat5_market.db --watchlist C:\trading_system\LAT_5.0\LAT_SIMPLE_v1.0_Watchlist.md --as-of 2026-08-18
+output=C:\trading_system\LAT_5.0\reports\monthly_weekly_filter\2026-08-18.md
+as_of=2026-08-18 universe=154 matches=20
+240810	원익IPS
+084370	유진테크
+140860	파크시스템스
+039030	이오테크닉스
+089030	테크윙
+000150	두산
+006400	삼성SDI
+012450	한화에어로스페이스
+298040	효성중공업
+241560	두산밥캣
+006260	LS
+047040	대우건설
+108490	로보티즈
+058610	에스피지
+064400	LG CNS
+327260	RF머트리얼즈
+064760	티씨케이
+067310	하나마이크론
+330860	네패스아크
+010060	OCI홀딩스
+$ C:\Users\User\AppData\Local\Programs\Python\Python313\python.exe C:\trading_system\LAT_5.0\scripts\scan_trendline_rank.py --db C:\trading_system\LAT_5.0\data\lat5_market.db --watchlist C:\trading_system\LAT_5.0\LAT_SIMPLE_v1.0_Watchlist.md --as-of 2026-08-18
+output=C:\trading_system\LAT_5.0\reports\trendline_rank\2026-08-18.md
+signals=0 selected=0
+=== run result=COMPLETE ===
