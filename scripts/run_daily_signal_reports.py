@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 
@@ -22,11 +22,18 @@ def _subprocess_env(root: Path) -> dict[str, str]:
     return env
 
 
+DASHBOARD_LOOKBACK_DAYS = 60
+
+
 def build_pipeline_commands(
     *, python: str, root: Path, as_of: str
 ) -> list[list[str]]:
     db = root / "data" / "lat5_market.db"
     watchlist = root / "LAT_SIMPLE_v1.0_Watchlist.md"
+    scoring_dir = root / "artifacts" / "latest_scoring"
+    backtest_start = (
+        datetime.strptime(as_of, "%Y-%m-%d") - timedelta(days=DASHBOARD_LOOKBACK_DAYS)
+    ).strftime("%Y-%m-%d")
     return [
         [
             python, "-m", "lat5.cli", "collect",
@@ -47,6 +54,16 @@ def build_pipeline_commands(
         [
             python, str(root / "scripts" / "scan_trendline_rank.py"),
             "--db", str(db), "--watchlist", str(watchlist), "--as-of", as_of,
+        ],
+        [
+            python, "-m", "lat5.cli", "backtest",
+            "--source-db", str(db), "--watchlist", str(watchlist),
+            "--output-dir", str(scoring_dir),
+            "--strategy", "hourly-pullback-reversal", "--location-filter",
+            "--start", backtest_start, "--end", as_of, "--overwrite",
+        ],
+        [
+            python, str(root / "scripts" / "build_dashboard.py"),
         ],
     ]
 
