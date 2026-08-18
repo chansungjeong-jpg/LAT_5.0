@@ -141,6 +141,7 @@ def test_full_pass_reaches_buy_ready_with_max_score():
         "recent_5d_bullish": 5,
         "daily_trend_persistence": 5,
         "daily_sma5_distance": 0,
+        "decline_rebound_slope": 0,
     }
     assert result["state"] == "BUY_READY"
     assert result["vetoes"] == []

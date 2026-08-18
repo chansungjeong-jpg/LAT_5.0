@@ -57,6 +57,9 @@ def test_build_context_with_no_data_returns_safe_defaults():
             "sma5_distance_pct": None,
             "sma5_distance_trend": "UNKNOWN",
             "sma5_distance_score": 0,
+            "decline_rebound_slope_ratio": None,
+            "decline_rebound_slope_state": "UNKNOWN",
+            "decline_rebound_slope_score": 0,
     }
 
 
@@ -177,6 +180,65 @@ def test_build_context_scores_daily_sma5_distance_when_price_closes_in():
     assert ctx["sma5_distance_score"] == 10
 
 
+def test_build_context_scores_steep_rebound_after_shallower_decline():
+    close = pd.Series(
+        [100, 102, 104, 106, 108, 106, 104, 102, 100, 98, 100, 104, 108, 114, 120],
+        index=pd.date_range("2026-08-01", periods=15, freq="D"),
+    )
+    daily = pd.DataFrame(
+        {
+            "open": close - 1,
+            "high": close + 1,
+            "low": close - 1,
+            "close": close,
+            "volume": 1000.0,
+        },
+        index=close.index,
+    )
+
+    ctx = build_context(
+        daily=daily,
+        daily_ema=daily_ema_context(daily),
+        hourly=_empty(["open", "high", "low", "close", "volume", "ema60", "ema120"]),
+        minutes=_empty(["open", "high", "low", "close", "volume", "ema20_5m"]),
+        as_of=close.index[-1] + pd.Timedelta(days=1),
+        cfg=LocationScoreConfig(),
+    )
+
+    assert ctx["decline_rebound_slope_state"] == "STEEP_REBOUND"
+    assert ctx["decline_rebound_slope_score"] == 10
+    assert ctx["decline_rebound_slope_ratio"] == pytest.approx(2.1538, abs=0.001)
+
+
+def test_build_context_scores_shallow_rebound_after_sharper_decline_as_zero():
+    close = pd.Series(
+        [100, 102, 104, 106, 108, 100, 92, 84, 76, 70, 71, 72, 73, 74, 75],
+        index=pd.date_range("2026-08-01", periods=15, freq="D"),
+    )
+    daily = pd.DataFrame(
+        {
+            "open": close - 1,
+            "high": close + 1,
+            "low": close - 1,
+            "close": close,
+            "volume": 1000.0,
+        },
+        index=close.index,
+    )
+
+    ctx = build_context(
+        daily=daily,
+        daily_ema=daily_ema_context(daily),
+        hourly=_empty(["open", "high", "low", "close", "volume", "ema60", "ema120"]),
+        minutes=_empty(["open", "high", "low", "close", "volume", "ema20_5m"]),
+        as_of=close.index[-1] + pd.Timedelta(days=1),
+        cfg=LocationScoreConfig(),
+    )
+
+    assert ctx["decline_rebound_slope_state"] == "REBOUND_SHALLOWER_THAN_DECLINE"
+    assert ctx["decline_rebound_slope_score"] == 0
+
+
 def test_build_context_tolerates_default_indexed_empty_frames():
     """Real KiwoomDataStore.load_daily/load_minutes return a plain empty
     DataFrame (default RangeIndex, no datetime dtype) for a brand-new ticker
@@ -220,6 +282,9 @@ def test_build_context_tolerates_default_indexed_empty_frames():
             "sma5_distance_pct": None,
             "sma5_distance_trend": "UNKNOWN",
             "sma5_distance_score": 0,
+            "decline_rebound_slope_ratio": None,
+            "decline_rebound_slope_state": "UNKNOWN",
+            "decline_rebound_slope_score": 0,
     }
 
 

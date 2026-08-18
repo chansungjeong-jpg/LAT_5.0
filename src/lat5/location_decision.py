@@ -8,6 +8,7 @@ from lat5.data import aggregate_weekly
 from lat5.daily_ma_reaction import score_daily_reaction, wilder_rsi14
 from lat5.hourly_abc_support import find_five_minute_reversal_entry, find_hourly_ma60_pullback, strong_hourly_breakout_at
 from lat5.location_score import evaluate_daily_ma_reaction_gate
+from lat5.patterns import confirmed_pivots
 from lat5.scoring import daily_trend
 
 
@@ -62,6 +63,48 @@ def _daily_sma5_distance_signal(daily: pd.DataFrame) -> tuple[float | None, str,
         trend = "STABLE"
         score = 0
     return current, trend, score
+
+
+def _decline_rebound_slope_signal(daily: pd.DataFrame) -> tuple[float | None, str, int]:
+    """Compare the daily-close decline slope from the last swing high down to
+    its following swing low against the rebound slope from that low back up
+    to today. A rebound steeper than the decline that preceded it scores as
+    strength (mirrors a V-shaped recovery); a shallow rebound after a sharp
+    drop does not.
+    """
+    if len(daily) < 10 or not {"high", "low", "close"}.issubset(daily.columns):
+        return None, "UNKNOWN", 0
+    pivots = confirmed_pivots(daily, left=2, right=2)
+    if not pivots.highs or not pivots.lows:
+        return None, "UNKNOWN", 0
+    high_pos = pivots.highs[-1]
+    low_candidates = [pos for pos in pivots.lows if pos > high_pos]
+    if not low_candidates:
+        return None, "UNKNOWN", 0
+    low_pos = low_candidates[-1]
+    current_pos = len(daily) - 1
+    decline_days = low_pos - high_pos
+    rebound_days = current_pos - low_pos
+    if decline_days <= 0 or rebound_days <= 0:
+        return None, "UNKNOWN", 0
+
+    high_price = float(daily.iloc[high_pos]["high"])
+    low_price = float(daily.iloc[low_pos]["low"])
+    current_price = float(daily["close"].iloc[-1])
+    if high_price <= 0 or low_price <= 0:
+        return None, "UNKNOWN", 0
+
+    decline_slope = (high_price - low_price) / high_price / decline_days
+    if decline_slope <= 0:
+        return None, "UNKNOWN", 0
+    rebound_slope = (current_price - low_price) / low_price / rebound_days
+
+    ratio = rebound_slope / decline_slope
+    if ratio >= 2.0:
+        return ratio, "STEEP_REBOUND", 10
+    if ratio >= 1.0:
+        return ratio, "REBOUND_STEEPER_THAN_DECLINE", 5
+    return ratio, "REBOUND_SHALLOWER_THAN_DECLINE", 0
 
 
 def _daily_volume_score(ratio: float | None) -> int:
@@ -182,6 +225,7 @@ def build_context(
     sma5_distance_pct, sma5_distance_trend, sma5_distance_score = _daily_sma5_distance_signal(
         prior_daily
     )
+    slope_ratio, slope_state, slope_score = _decline_rebound_slope_signal(prior_daily)
     ctx.update(
         {
             "daily_ma_reaction_score": daily_reaction.total_score,
@@ -191,6 +235,9 @@ def build_context(
             "sma5_distance_pct": sma5_distance_pct,
             "sma5_distance_trend": sma5_distance_trend,
             "sma5_distance_score": sma5_distance_score,
+            "decline_rebound_slope_ratio": slope_ratio,
+            "decline_rebound_slope_state": slope_state,
+            "decline_rebound_slope_score": slope_score,
         }
     )
 
@@ -487,6 +534,7 @@ def evaluate_watchlist_position(ctx: dict, cfg: LocationScoreConfig) -> dict:
         "recent_5d_bullish": recent_bullish_score,
         "daily_trend_persistence": 5 if ctx.get("daily_trend_ok") is True else 0,
         "daily_sma5_distance": int(ctx.get("sma5_distance_score", 0) or 0),
+        "decline_rebound_slope": int(ctx.get("decline_rebound_slope_score", 0) or 0),
     }
     score = max(0, min(100, sum(score_components.values())))
     if daily_reaction_gate.component > 0:
