@@ -52,6 +52,50 @@ def confirmed_pivots(frame: pd.DataFrame, left: int = 2, right: int = 2) -> Pivo
     return Pivots(tuple(highs), tuple(lows))
 
 
+@dataclass(frozen=True)
+class ResistanceEntry:
+    resistance_price: float
+    entry_price: float
+    pivot_pos: int
+
+
+def first_resistance_entry(
+    frame: pd.DataFrame,
+    *,
+    lookback: int = 60,
+    left: int = 2,
+    right: int = 2,
+    breakout_buffer_pct: float = 0.002,
+) -> ResistanceEntry | None:
+    """Nearest confirmed swing-high still above the latest close, as an
+    overhead-resistance breakout entry (entry = resistance x (1 + buffer),
+    matching the Watchlist gate's `breakout_buffer_pct`). Returns None when
+    there is no confirmed swing high left above the current price -- price
+    is already making new highs, or there is not enough history.
+    """
+    if len(frame) < left + right + 1:
+        return None
+    start = max(0, len(frame) - lookback)
+    window = frame.iloc[start:]
+    pivots = confirmed_pivots(window, left=left, right=right)
+    if not pivots.highs:
+        return None
+    current_price = float(frame["close"].iloc[-1])
+    candidates = [
+        (float(window.iloc[pos]["high"]), start + pos)
+        for pos in pivots.highs
+        if float(window.iloc[pos]["high"]) > current_price
+    ]
+    if not candidates:
+        return None
+    resistance_price, pivot_pos = min(candidates, key=lambda item: item[0])
+    return ResistanceEntry(
+        resistance_price=resistance_price,
+        entry_price=resistance_price * (1.0 + breakout_buffer_pct),
+        pivot_pos=pivot_pos,
+    )
+
+
 def _project_line(first_pos: int, first_value: float, second_pos: int, second_value: float, target: int) -> float:
     slope = (second_value - first_value) / (second_pos - first_pos)
     return first_value + slope * (target - first_pos)

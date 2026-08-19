@@ -1,6 +1,14 @@
 import pandas as pd
 
-from lat5.patterns import build_rising_channel, confirmed_pivots, find_abc, is_anchor
+import pytest
+
+from lat5.patterns import (
+    build_rising_channel,
+    confirmed_pivots,
+    find_abc,
+    first_resistance_entry,
+    is_anchor,
+)
 
 
 def _frame(high, low, close=None, open_=None, volume=None, amount=None):
@@ -83,3 +91,38 @@ def test_find_abc_requires_higher_c_low_and_returns_entry_stop_expiry():
 
 def test_find_abc_rejects_c_at_or_below_first_pullback():
     assert find_abc(_abc_frame(c_low=102.5), anchor_pos=20, tick_size=0.5) is None
+
+
+def test_first_resistance_entry_picks_nearest_overhead_swing_high_not_the_highest():
+    frame = _frame(
+        high=[100, 102, 110, 102, 100, 103, 120, 103, 100, 101, 102, 103, 104],
+        low=[98, 100, 108, 100, 98, 101, 118, 101, 98, 99, 100, 101, 102],
+    )
+
+    result = first_resistance_entry(frame)
+
+    assert result is not None
+    assert result.resistance_price == 110.0
+    assert result.pivot_pos == 2
+    assert result.entry_price == pytest.approx(110.0 * 1.002)
+
+
+def test_first_resistance_entry_none_when_price_already_above_every_swing_high():
+    frame = _frame(
+        high=[100, 102, 110, 102, 100, 103, 120, 103, 100, 125, 126, 127, 128],
+        low=[98, 100, 108, 100, 98, 101, 118, 101, 98, 123, 124, 125, 126],
+    )
+
+    assert first_resistance_entry(frame) is None
+
+
+def test_first_resistance_entry_uses_custom_breakout_buffer():
+    frame = _frame(
+        high=[100, 102, 110, 102, 100, 103, 120, 103, 100, 101, 102, 103, 104],
+        low=[98, 100, 108, 100, 98, 101, 118, 101, 98, 99, 100, 101, 102],
+    )
+
+    result = first_resistance_entry(frame, breakout_buffer_pct=0.01)
+
+    assert result is not None
+    assert result.entry_price == pytest.approx(110.0 * 1.01)
