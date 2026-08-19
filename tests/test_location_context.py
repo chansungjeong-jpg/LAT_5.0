@@ -60,6 +60,11 @@ def test_build_context_with_no_data_returns_safe_defaults():
             "decline_rebound_slope_ratio": None,
             "decline_rebound_slope_state": "UNKNOWN",
             "decline_rebound_slope_score": 0,
+            "breakout_resistance_price": None,
+            "breakout_entry_price": None,
+            "breakout_stop_price": None,
+            "breakout_target_price": None,
+            "breakout_rr": None,
     }
 
 
@@ -285,6 +290,11 @@ def test_build_context_tolerates_default_indexed_empty_frames():
             "decline_rebound_slope_ratio": None,
             "decline_rebound_slope_state": "UNKNOWN",
             "decline_rebound_slope_score": 0,
+            "breakout_resistance_price": None,
+            "breakout_entry_price": None,
+            "breakout_stop_price": None,
+            "breakout_target_price": None,
+            "breakout_rr": None,
     }
 
 

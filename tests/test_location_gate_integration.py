@@ -192,6 +192,11 @@ def test_runner_allows_candidate_when_location_state_ready(monkeypatch, tmp_path
                 "target_price": 110.0,
                 "rr": 2.0,
             },
+            "breakout_resistance_price": None,
+            "breakout_entry_price": None,
+            "breakout_stop_price": None,
+            "breakout_target_price": None,
+            "breakout_rr": None,
         }
     ]
     with sqlite3.connect(output_db) as connection:

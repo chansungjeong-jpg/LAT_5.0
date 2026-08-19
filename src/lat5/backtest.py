@@ -917,6 +917,11 @@ def run_hourly_pullback_reversal_baseline(
                             "m60_rsi14": location.get("m60_rsi14"),
                             "daily_ma_reaction": location.get("daily_ma_reaction"),
                             "rr_breakdown": location.get("rr_breakdown"),
+                            "breakout_resistance_price": location.get("breakout_resistance_price"),
+                            "breakout_entry_price": location.get("breakout_entry_price"),
+                            "breakout_stop_price": location.get("breakout_stop_price"),
+                            "breakout_target_price": location.get("breakout_target_price"),
+                            "breakout_rr": location.get("breakout_rr"),
                         }
                     )
                     if location.get("entry_eligible") is not True:

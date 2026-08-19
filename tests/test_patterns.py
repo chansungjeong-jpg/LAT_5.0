@@ -3,11 +3,13 @@ import pandas as pd
 import pytest
 
 from lat5.patterns import (
+    breakout_rr_setup,
     build_rising_channel,
     confirmed_pivots,
     find_abc,
     first_resistance_entry,
     is_anchor,
+    nearest_support_below,
 )
 
 
@@ -126,3 +128,53 @@ def test_first_resistance_entry_uses_custom_breakout_buffer():
 
     assert result is not None
     assert result.entry_price == pytest.approx(110.0 * 1.01)
+
+
+def _breakout_rr_frame():
+    return _frame(
+        high=[100, 102, 110, 102, 98, 103, 130, 103, 100, 101, 102, 103, 104, 103, 104],
+        low=[98, 100, 108, 100, 96, 101, 128, 101, 98, 99, 100, 101, 102, 101, 102],
+    )
+
+
+def test_nearest_support_below_picks_closest_swing_low_under_current_price():
+    frame = _breakout_rr_frame()
+
+    support = nearest_support_below(frame)
+
+    assert support == 98.0
+
+
+def test_nearest_support_below_none_when_price_already_under_every_swing_low():
+    frame = _frame(
+        high=[130, 128, 120, 128, 130, 127, 110, 127, 130, 90, 89, 88, 87],
+        low=[128, 126, 118, 126, 128, 125, 108, 125, 128, 88, 87, 86, 85],
+    )
+
+    assert nearest_support_below(frame) is None
+
+
+def test_breakout_rr_setup_combines_entry_stop_and_next_resistance_target():
+    frame = _breakout_rr_frame()
+
+    setup = breakout_rr_setup(frame)
+
+    assert setup is not None
+    assert setup.resistance_price == 110.0
+    assert setup.entry_price == pytest.approx(110.0 * 1.002)
+    assert setup.stop_price == 98.0
+    assert setup.target_price == 130.0
+    expected_rr = (130.0 - setup.entry_price) / (setup.entry_price - 98.0)
+    assert setup.rr == pytest.approx(expected_rr)
+
+
+def test_breakout_rr_setup_none_when_no_further_resistance_beyond_entry():
+    # Same R1 (110) and support (96) as _breakout_rr_frame, but truncated
+    # before the second resistance peak ever forms -- entry and stop both
+    # resolve fine, only the reward leg is missing.
+    frame = _frame(
+        high=[100, 102, 110, 102, 98, 103, 104],
+        low=[98, 100, 108, 100, 96, 101, 102],
+    )
+
+    assert breakout_rr_setup(frame) is None

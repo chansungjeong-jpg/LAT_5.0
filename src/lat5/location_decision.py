@@ -8,7 +8,7 @@ from lat5.data import aggregate_weekly
 from lat5.daily_ma_reaction import score_daily_reaction, wilder_rsi14
 from lat5.hourly_abc_support import find_five_minute_reversal_entry, find_hourly_ma60_pullback, strong_hourly_breakout_at
 from lat5.location_score import evaluate_daily_ma_reaction_gate
-from lat5.patterns import confirmed_pivots
+from lat5.patterns import breakout_rr_setup, confirmed_pivots
 from lat5.scoring import daily_trend
 
 
@@ -226,6 +226,7 @@ def build_context(
         prior_daily
     )
     slope_ratio, slope_state, slope_score = _decline_rebound_slope_signal(prior_daily)
+    breakout_rr = breakout_rr_setup(prior_daily)
     ctx.update(
         {
             "daily_ma_reaction_score": daily_reaction.total_score,
@@ -238,6 +239,11 @@ def build_context(
             "decline_rebound_slope_ratio": slope_ratio,
             "decline_rebound_slope_state": slope_state,
             "decline_rebound_slope_score": slope_score,
+            "breakout_resistance_price": breakout_rr.resistance_price if breakout_rr else None,
+            "breakout_entry_price": breakout_rr.entry_price if breakout_rr else None,
+            "breakout_stop_price": breakout_rr.stop_price if breakout_rr else None,
+            "breakout_target_price": breakout_rr.target_price if breakout_rr else None,
+            "breakout_rr": breakout_rr.rr if breakout_rr else None,
         }
     )
 
@@ -608,6 +614,11 @@ def evaluate_watchlist_position(ctx: dict, cfg: LocationScoreConfig) -> dict:
         "sector_score": sector_score,
         "m60_rsi14": ctx.get("m60_rsi14"),
         "rr_breakdown": rr_breakdown,
+        "breakout_resistance_price": ctx.get("breakout_resistance_price"),
+        "breakout_entry_price": ctx.get("breakout_entry_price"),
+        "breakout_stop_price": ctx.get("breakout_stop_price"),
+        "breakout_target_price": ctx.get("breakout_target_price"),
+        "breakout_rr": ctx.get("breakout_rr"),
         "daily_ma_reaction": ctx.get(
             "daily_ma_reaction",
             {

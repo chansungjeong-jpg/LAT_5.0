@@ -59,6 +59,28 @@ class ResistanceEntry:
     pivot_pos: int
 
 
+def _swing_high_prices(
+    frame: pd.DataFrame, *, lookback: int, left: int, right: int
+) -> list[tuple[float, int]]:
+    if len(frame) < left + right + 1:
+        return []
+    start = max(0, len(frame) - lookback)
+    window = frame.iloc[start:]
+    pivots = confirmed_pivots(window, left=left, right=right)
+    return [(float(window.iloc[pos]["high"]), start + pos) for pos in pivots.highs]
+
+
+def _swing_low_prices(
+    frame: pd.DataFrame, *, lookback: int, left: int, right: int
+) -> list[tuple[float, int]]:
+    if len(frame) < left + right + 1:
+        return []
+    start = max(0, len(frame) - lookback)
+    window = frame.iloc[start:]
+    pivots = confirmed_pivots(window, left=left, right=right)
+    return [(float(window.iloc[pos]["low"]), start + pos) for pos in pivots.lows]
+
+
 def first_resistance_entry(
     frame: pd.DataFrame,
     *,
@@ -73,18 +95,13 @@ def first_resistance_entry(
     there is no confirmed swing high left above the current price -- price
     is already making new highs, or there is not enough history.
     """
-    if len(frame) < left + right + 1:
+    current_price = float(frame["close"].iloc[-1]) if not frame.empty else None
+    if current_price is None:
         return None
-    start = max(0, len(frame) - lookback)
-    window = frame.iloc[start:]
-    pivots = confirmed_pivots(window, left=left, right=right)
-    if not pivots.highs:
-        return None
-    current_price = float(frame["close"].iloc[-1])
     candidates = [
-        (float(window.iloc[pos]["high"]), start + pos)
-        for pos in pivots.highs
-        if float(window.iloc[pos]["high"]) > current_price
+        item
+        for item in _swing_high_prices(frame, lookback=lookback, left=left, right=right)
+        if item[0] > current_price
     ]
     if not candidates:
         return None
@@ -93,6 +110,83 @@ def first_resistance_entry(
         resistance_price=resistance_price,
         entry_price=resistance_price * (1.0 + breakout_buffer_pct),
         pivot_pos=pivot_pos,
+    )
+
+
+def nearest_support_below(
+    frame: pd.DataFrame,
+    *,
+    lookback: int = 60,
+    left: int = 2,
+    right: int = 2,
+) -> float | None:
+    """Nearest confirmed swing-low still below the latest close -- used as
+    the stop-loss reference for a resistance-breakout entry (the level
+    price would have to fail back through to invalidate the setup).
+    """
+    current_price = float(frame["close"].iloc[-1]) if not frame.empty else None
+    if current_price is None:
+        return None
+    candidates = [
+        price
+        for price, _ in _swing_low_prices(frame, lookback=lookback, left=left, right=right)
+        if price < current_price
+    ]
+    return max(candidates) if candidates else None
+
+
+@dataclass(frozen=True)
+class BreakoutRRSetup:
+    resistance_price: float
+    entry_price: float
+    stop_price: float
+    target_price: float
+    rr: float
+
+
+def breakout_rr_setup(
+    frame: pd.DataFrame,
+    *,
+    lookback: int = 60,
+    left: int = 2,
+    right: int = 2,
+    breakout_buffer_pct: float = 0.002,
+) -> BreakoutRRSetup | None:
+    """Auto risk/reward for a first-resistance breakout entry: stop is the
+    nearest swing low below current price, target is the next confirmed
+    swing high beyond the entry price (the resistance *after* the one being
+    broken). Returns None whenever any leg -- entry, stop, or a further
+    target -- can't be established, rather than guessing.
+    """
+    entry = first_resistance_entry(
+        frame,
+        lookback=lookback,
+        left=left,
+        right=right,
+        breakout_buffer_pct=breakout_buffer_pct,
+    )
+    if entry is None:
+        return None
+    stop_price = nearest_support_below(frame, lookback=lookback, left=left, right=right)
+    if stop_price is None or stop_price >= entry.entry_price:
+        return None
+    target_candidates = [
+        price
+        for price, _ in _swing_high_prices(frame, lookback=lookback, left=left, right=right)
+        if price > entry.entry_price
+    ]
+    if not target_candidates:
+        return None
+    target_price = min(target_candidates)
+    risk = entry.entry_price - stop_price
+    if risk <= 0:
+        return None
+    return BreakoutRRSetup(
+        resistance_price=entry.resistance_price,
+        entry_price=entry.entry_price,
+        stop_price=stop_price,
+        target_price=target_price,
+        rr=(target_price - entry.entry_price) / risk,
     )
 
 
