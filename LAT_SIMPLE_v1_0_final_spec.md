@@ -597,6 +597,48 @@ SMA20 종가 이탈은 `DAILY_MA_HARD_BLOCK`으로 BUY 계열 판정을 차단�
 미래 봉은 SMA·ATR·RSI·품질·반응 계산에 사용하지 않는다. 필요한 OHLCV/SMA/ATR/RSI 데이터가
 부족하면 반응은 `UNKNOWN`, 점수는 0으로 기록하며 BUY 근거로 대체하지 않는다.
 
+### 9.2 보조 점수 항목
+
+기본 100점 표(9장 상단)에 더해지는 보조 항목 2개. 최종 위치 점수는 항상
+`max(0, min(100, 기본항목 합 + 보조항목 합))`으로 클램프한다 — 보조 항목이
+합계를 100점 초과로 밀어 올릴 수는 없다.
+
+**일봉 5선 이격도 추세** (2026-08-14 도입, 범위 -10~+10)
+
+최근 완료 3개 일봉의 "종가-SMA5 절대거리 비율" 추세를 본다.
+
+```text
+거리 비율 = |종가 - SMA5| / |SMA5|
+추세 = 최근 3봉 중 첫 값 대비 마지막 값 증감
+```
+
+- 거리가 좁혀지는 중(`CLOSER`): 현재 거리 ≤1%=+10, ≤2%=+7, ≤3%=+4, 그 외 0
+- 거리가 벌어지는 중(`WIDER`): 현재 거리 >5%=-10, >3%=-5, 그 외 0
+- 변화 없음(`STABLE`): 0
+
+완료 일봉 3개 미만이면 `UNKNOWN`, 점수 0. 구현:
+`src/lat5/location_decision.py`의 `_daily_sma5_distance_signal`.
+
+**하락각 대비 반등각 기울기** (2026-08-19 도입, 범위 0~+10)
+
+최근 확정 스윙고점→그 뒤 스윙저점까지의 하락 기울기 대비, 스윙저점→오늘까지의
+반등 기울기가 얼마나 급한지를 본다. 반등이 하락보다 급하면(용수철형 반등)
+가점.
+
+```text
+하락 기울기 = (고점가 - 저점가) / 고점가 / 하락 소요일수
+반등 기울기 = (현재가 - 저점가) / 저점가 / 반등 소요일수
+비율 = 반등 기울기 / 하락 기울기
+비율 >=2.0 = +10 (STEEP_REBOUND)
+비율 >=1.0 = +5  (REBOUND_STEEPER_THAN_DECLINE)
+비율 <1.0  = 0   (REBOUND_SHALLOWER_THAN_DECLINE)
+```
+
+스윙고점 뒤에 스윙저점이 없거나, 하락 기울기가 0 이하거나(고점 붕괴 없음),
+완료 일봉 10개 미만이면 `UNKNOWN`, 점수 0. 구현:
+`src/lat5/location_decision.py`의 `_decline_rebound_slope_signal`
+(스윙 탐지는 `src/lat5/patterns.py`의 `confirmed_pivots`, left=2/right=2).
+
 ---
 
 ## 10. 이격도 Gate
@@ -873,6 +915,13 @@ distance_state
 supply_zone_method
 rr_breakdown
 rr
+daily_sma5_distance_score
+decline_rebound_slope_score
+breakout_resistance_price
+breakout_entry_price
+breakout_stop_price
+breakout_target_price
+breakout_rr
 final_state
 reason
 ```
@@ -903,6 +952,57 @@ reason = Trend and volume strong, but 5m gap 3.6% exceeds chase limit
 decision = REJECT
 reason = RR 1.2 below minimum 1.5
 ```
+
+---
+
+## 17.1 저항돌파 참고 RR (breakout_rr)
+
+눌림 구조(9.1의 `pullback_pos`)가 아직 없는 종목에도 참고용 RR을 계산한다.
+9장 위치 점수·`rr`/`RR_TOO_LOW` 거부 로직과는 **완전히 분리된 별도 값**이며
+`entry_eligible`·BUY 게이트에 반영하지 않는다.
+
+```text
+1차 저항 = 최근 60거래일 내 확정 스윙고점(left=2,right=2) 중 현재가보다 높은 것 중 최근접
+진입가 = 1차 저항 x (1 + breakout_buffer_pct[기본 0.2%])
+손절가 = 같은 60거래일 창에서 현재가보다 낮은 확정 스윙저점 중 최근접
+목표가 = 진입가보다 높은 확정 스윙고점 중 최근접 (2차 저항)
+breakout_rr = (목표가 - 진입가) / (진입가 - 손절가)
+```
+
+세 다리(진입/손절/목표) 중 하나라도 성립하지 않으면(저항 없음=신고가권,
+지지 없음, 더 위 저항 없음) `breakout_rr`은 계산하지 않고 `null`로 남긴다 —
+임의 추정하지 않는다. 구현: `src/lat5/patterns.py`의
+`first_resistance_entry`/`nearest_support_below`/`breakout_rr_setup`.
+
+---
+
+## 17.2 일일 자동화 파이프라인·대시보드
+
+`scripts/run_daily_signal_reports.py`가 아래 순서로 실행하며, 어느 단계든
+비정상 종료하면 다음 단계로 넘어가지 않는다(fail-closed).
+
+```text
+1. collect (Kiwoom 전체 154종목 수집)
+2. data-health (PASS 아니면 중단)
+3. 0장 1차 필터 (월봉10·주봉5 회복)
+4. 60분 추세선 랭킹 스캔
+5. hourly-pullback-reversal 백테스트(--location-filter, 최근 60일)
+6. 대시보드 재생성 (scripts/build_dashboard.py)
+```
+
+Windows 작업 스케줄러 `LAT5_Monthly10_Weekly5_Recovery`가 매일 16:00
+무인 실행한다. 로그: `reports/daily_pipeline/<날짜>.log`(누적 append,
+덮어쓰지 않음). 5번 백테스트 결과가
+`artifacts/latest_scoring/backtest_diagnostics.json`에 쌓이고, 6번이 그걸
+읽어 `dashboard/index.html`(바탕화면 바로가기: `LAT 5.0 Top20 대시보드`)을
+위치 점수 상위 20개 표로 재생성한다. 대시보드는 관찰용이며 표 안에
+`entry_eligible=가능`이 0건이어도 정상 결과다(17.1의 `breakout_rr`은
+매수 게이트와 무관한 참고 컬럼으로만 표시).
+
+패턴 확률 스캐너(`scripts/pattern_probability_scan.py`)는 이 파이프라인에
+포함하지 않는다. 이력 재수집이 없는 날은 결과가 같으므로 월 1회 수동
+실행을 권장한다(`docs/superpowers/specs/2026-08-18-pattern-probability-scan-design.md`
+참고).
 
 ---
 
