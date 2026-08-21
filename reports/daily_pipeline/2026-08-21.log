@@ -1,0 +1,31 @@
+=== run started_at=2026-08-21T23:53:18 ===
+$ C:\Users\User\AppData\Local\Programs\Python\Python313\python.exe -m lat5.cli collect --db C:\trading_system\LAT_5.0\data\lat5_market.db --watchlist C:\trading_system\LAT_5.0\LAT_SIMPLE_v1.0_Watchlist.md --env C:\trading_system\LAT_5.0\.env --token-cache C:\trading_system\LAT_5.0\data\kiwoom_token_cache.json --base-date 20260821
+{"status": "COMPLETE", "run_id": 22, "symbols": 154, "success_symbols": 154, "api_errors": 0}
+$ C:\Users\User\AppData\Local\Programs\Python\Python313\python.exe -m lat5.cli data-health --db C:\trading_system\LAT_5.0\data\lat5_market.db --watchlist C:\trading_system\LAT_5.0\LAT_SIMPLE_v1.0_Watchlist.md --output-dir C:\trading_system\LAT_5.0
+{"status": "PASS", "json": "C:\\trading_system\\LAT_5.0\\artifacts\\data_health_latest.json", "report": "C:\\trading_system\\LAT_5.0\\reports\\data_health_latest.md"}
+$ C:\Users\User\AppData\Local\Programs\Python\Python313\python.exe C:\trading_system\LAT_5.0\scripts\filter_monthly10_weekly5.py --db C:\trading_system\LAT_5.0\data\lat5_market.db --watchlist C:\trading_system\LAT_5.0\LAT_SIMPLE_v1.0_Watchlist.md --as-of 2026-08-21
+output=C:\trading_system\LAT_5.0\reports\monthly_weekly_filter\2026-08-21.md
+as_of=2026-08-21 universe=154 matches=15
+240810	원익IPS
+084370	유진테크
+403870	HPSP
+039030	이오테크닉스
+006400	삼성SDI
+000810	삼성화재
+196170	알테오젠
+047040	대우건설
+064400	LG CNS
+327260	RF머트리얼즈
+138080	오이솔루션
+064760	티씨케이
+067310	하나마이크론
+183300	코미코
+010060	OCI홀딩스
+$ C:\Users\User\AppData\Local\Programs\Python\Python313\python.exe C:\trading_system\LAT_5.0\scripts\scan_trendline_rank.py --db C:\trading_system\LAT_5.0\data\lat5_market.db --watchlist C:\trading_system\LAT_5.0\LAT_SIMPLE_v1.0_Watchlist.md --as-of 2026-08-21
+output=C:\trading_system\LAT_5.0\reports\trendline_rank\2026-08-21.md
+signals=0 selected=0
+$ C:\Users\User\AppData\Local\Programs\Python\Python313\python.exe -m lat5.cli backtest --source-db C:\trading_system\LAT_5.0\data\lat5_market.db --watchlist C:\trading_system\LAT_5.0\LAT_SIMPLE_v1.0_Watchlist.md --output-dir C:\trading_system\LAT_5.0\artifacts\latest_scoring --strategy hourly-pullback-reversal --location-filter --start 2026-06-22 --end 2026-08-21 --overwrite
+{"summary": {"trades": 0, "win_rate": 0.0, "profit_factor": 0.0, "expectancy": 0.0, "net_pnl": 0.0, "return_pct": 0.0, "max_drawdown": 0.0}, "output_dir": "C:\\trading_system\\LAT_5.0\\artifacts\\latest_scoring"}
+$ C:\Users\User\AppData\Local\Programs\Python\Python313\python.exe C:\trading_system\LAT_5.0\scripts\build_dashboard.py
+C:\trading_system\LAT_5.0\dashboard\index.html
+=== run result=COMPLETE ===
