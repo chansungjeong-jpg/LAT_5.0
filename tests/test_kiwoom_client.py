@@ -2,6 +2,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
+import requests
 
 from lat5.kiwoom_client import KiwoomApiError, KiwoomClient, KiwoomTokenError
 from lat5.token_provider import TokenSnapshot
@@ -24,7 +25,10 @@ class FakeSession:
 
     def post(self, url, **kwargs):
         self.calls.append((url, kwargs))
-        return self.responses.pop(0)
+        item = self.responses.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
 
 
 def _token():
@@ -47,6 +51,41 @@ def test_post_pages_propagates_continuation_headers():
     assert session.calls[0][1]["headers"]["api-id"] == "ka10080"
     assert session.calls[1][1]["headers"]["cont-yn"] == "Y"
     assert session.calls[1][1]["headers"]["next-key"] == "NEXT"
+
+
+def test_post_pages_retries_network_timeout_then_returns_success():
+    """Regression: 2026-08-27 scheduled run -- a raw requests.ReadTimeout
+    propagated all the way out of collect_watchlist and crashed the entire
+    154-symbol run instead of being retried like a 429/5xx."""
+    session = FakeSession(
+        [
+            requests.exceptions.ReadTimeout("read timed out"),
+            FakeResponse({"return_code": 0}, {"cont-yn": "N"}),
+        ]
+    )
+    sleeps = []
+    client = KiwoomClient(_token(), session=session, min_interval=0, sleep=sleeps.append)
+
+    assert len(list(client.post_pages("ka10081", "/api/dostk/chart", {}))) == 1
+    assert len(session.calls) == 2
+    assert sleeps == [1.0]
+
+
+def test_post_pages_raises_kiwoom_api_error_after_repeated_network_timeouts():
+    session = FakeSession(
+        [
+            requests.exceptions.ReadTimeout("read timed out"),
+            requests.exceptions.ReadTimeout("read timed out"),
+            requests.exceptions.ReadTimeout("read timed out"),
+        ]
+    )
+    client = KiwoomClient(
+        _token(), session=session, min_interval=0, max_attempts=3, sleep=lambda _: None
+    )
+
+    with pytest.raises(KiwoomApiError, match="network error"):
+        list(client.post_pages("ka10081", "/api/dostk/chart", {}))
+    assert len(session.calls) == 3
 
 
 def test_post_pages_retries_429_then_returns_success():

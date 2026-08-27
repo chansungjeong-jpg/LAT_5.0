@@ -74,9 +74,18 @@ class KiwoomClient:
         }
         for attempt in range(1, self.max_attempts + 1):
             self._rate_limit()
-            response = self.session.post(
-                f"{self.base_url}{path}", headers=headers, json=body, timeout=15
-            )
+            try:
+                response = self.session.post(
+                    f"{self.base_url}{path}", headers=headers, json=body, timeout=15
+                )
+            except requests.exceptions.RequestException as exc:
+                self._last_request_at = self.clock()
+                if attempt == self.max_attempts:
+                    raise KiwoomApiError(
+                        f"network error after {attempt} attempts: {exc}"
+                    ) from exc
+                self.sleep(float(attempt))
+                continue
             self._last_request_at = self.clock()
             if response.status_code == 429 or response.status_code >= 500:
                 if attempt == self.max_attempts:
