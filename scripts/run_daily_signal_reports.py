@@ -85,6 +85,7 @@ def main() -> int:
     run_started_at = datetime.now().isoformat(timespec="seconds")
     with log_path.open("a", encoding="utf-8") as log:
         log.write(f"=== run started_at={run_started_at} ===\n")
+        log.flush()
         env = _subprocess_env(ROOT)
         for command in commands:
             completed = subprocess.run(
@@ -93,8 +94,10 @@ def main() -> int:
             log.write(f"$ {' '.join(command)}\n")
             log.write(completed.stdout or "")
             log.write(completed.stderr or "")
+            log.flush()
             if completed.returncode != 0:
                 log.write(f"=== run result=BLOCKED command_exit={completed.returncode} ===\n")
+                log.flush()
                 print(f"BLOCKED command_exit={completed.returncode} log={log_path}")
                 return completed.returncode
         log.write("=== run result=COMPLETE ===\n")
