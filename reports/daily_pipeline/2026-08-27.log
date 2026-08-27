@@ -1,0 +1,138 @@
+=== run started_at=2026-08-27T16:00:01 ===
+$ C:\Users\User\AppData\Local\Programs\Python\Python313\python.exe -m lat5.cli collect --db C:\trading_system\LAT_5.0\data\lat5_market.db --watchlist C:\trading_system\LAT_5.0\LAT_SIMPLE_v1.0_Watchlist.md --env C:\trading_system\LAT_5.0\.env --token-cache C:\trading_system\LAT_5.0\data\kiwoom_token_cache.json --base-date 20260827
+Traceback (most recent call last):
+  File "C:\Users\User\AppData\Local\Programs\Python\Python313\Lib\site-packages\urllib3\connectionpool.py", line 534, in _make_request
+    response = conn.getresponse()
+  File "C:\Users\User\AppData\Local\Programs\Python\Python313\Lib\site-packages\urllib3\connection.py", line 571, in getresponse
+    httplib_response = super().getresponse()
+  File "C:\Users\User\AppData\Local\Programs\Python\Python313\Lib\http\client.py", line 1428, in getresponse
+    response.begin()
+    ~~~~~~~~~~~~~~^^
+  File "C:\Users\User\AppData\Local\Programs\Python\Python313\Lib\http\client.py", line 331, in begin
+    version, status, reason = self._read_status()
+                              ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\User\AppData\Local\Programs\Python\Python313\Lib\http\client.py", line 292, in _read_status
+    line = str(self.fp.readline(_MAXLINE + 1), "iso-8859-1")
+               ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "C:\Users\User\AppData\Local\Programs\Python\Python313\Lib\socket.py", line 719, in readinto
+    return self._sock.recv_into(b)
+           ~~~~~~~~~~~~~~~~~~~~^^^
+  File "C:\Users\User\AppData\Local\Programs\Python\Python313\Lib\ssl.py", line 1304, in recv_into
+    return self.read(nbytes, buffer)
+           ~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\User\AppData\Local\Programs\Python\Python313\Lib\ssl.py", line 1138, in read
+    return self._sslobj.read(len, buffer)
+           ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+TimeoutError: The read operation timed out
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\User\AppData\Local\Programs\Python\Python313\Lib\site-packages\requests\adapters.py", line 696, in send
+    resp = conn.urlopen(
+        method=request.method,
+    ...<9 lines>...
+        chunked=chunked,
+    )
+  File "C:\Users\User\AppData\Local\Programs\Python\Python313\Lib\site-packages\urllib3\connectionpool.py", line 842, in urlopen
+    retries = retries.increment(
+        method, url, error=new_e, _pool=self, _stacktrace=sys.exc_info()[2]
+    )
+  File "C:\Users\User\AppData\Local\Programs\Python\Python313\Lib\site-packages\urllib3\util\retry.py", line 498, in increment
+    raise reraise(type(error), error, _stacktrace)
+          ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\AppData\Local\Programs\Python\Python313\Lib\site-packages\urllib3\util\util.py", line 39, in reraise
+    raise value
+  File "C:\Users\User\AppData\Local\Programs\Python\Python313\Lib\site-packages\urllib3\connectionpool.py", line 788, in urlopen
+    response = self._make_request(
+        conn,
+    ...<10 lines>...
+        **response_kw,
+    )
+  File "C:\Users\User\AppData\Local\Programs\Python\Python313\Lib\site-packages\urllib3\connectionpool.py", line 536, in _make_request
+    self._raise_timeout(err=e, url=url, timeout_value=read_timeout)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\AppData\Local\Programs\Python\Python313\Lib\site-packages\urllib3\connectionpool.py", line 367, in _raise_timeout
+    raise ReadTimeoutError(
+        self, url, f"Read timed out. (read timeout={timeout_value})"
+    ) from err
+urllib3.exceptions.ReadTimeoutError: HTTPSConnectionPool(host='api.kiwoom.com', port=443): Read timed out. (read timeout=15)
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\trading_system\LAT_5.0\src\lat5\cli.py", line 525, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "C:\trading_system\LAT_5.0\src\lat5\cli.py", line 518, in main
+    return _run_collect(args)
+  File "C:\trading_system\LAT_5.0\src\lat5\cli.py", line 476, in _run_collect
+    result = collect_watchlist(client, store, run_id, symbols, base_date)
+  File "C:\trading_system\LAT_5.0\src\lat5\collector.py", line 237, in collect_watchlist
+    result = collect_symbol(client, store, run_id, ticker, base_date)
+  File "C:\trading_system\LAT_5.0\src\lat5\collector.py", line 211, in collect_symbol
+    for page in pages:
+                ^^^^^
+  File "C:\trading_system\LAT_5.0\src\lat5\kiwoom_client.py", line 111, in post_pages
+    payload, response_headers = self._post(api_id, path, body, continuation)
+                                ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\trading_system\LAT_5.0\src\lat5\kiwoom_client.py", line 77, in _post
+    response = self.session.post(
+        f"{self.base_url}{path}", headers=headers, json=body, timeout=15
+    )
+  File "C:\Users\User\AppData\Local\Programs\Python\Python313\Lib\site-packages\requests\sessions.py", line 712, in post
+    return self.request("POST", url, data=data, json=json, **kwargs)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\User\AppData\Local\Programs\Python\Python313\Lib\site-packages\requests\sessions.py", line 651, in request
+    resp = self.send(prep, **send_kwargs)
+  File "C:\Users\User\AppData\Local\Programs\Python\Python313\Lib\site-packages\requests\sessions.py", line 784, in send
+    r = adapter.send(request, **kwargs)
+  File "C:\Users\User\AppData\Local\Programs\Python\Python313\Lib\site-packages\requests\adapters.py", line 742, in send
+    raise ReadTimeout(e, request=request)
+requests.exceptions.ReadTimeout: HTTPSConnectionPool(host='api.kiwoom.com', port=443): Read timed out. (read timeout=15)
+=== run result=BLOCKED command_exit=1 ===
+=== run started_at=2026-08-27T23:03:11 ===
+$ C:\Users\User\AppData\Local\Programs\Python\Python313\python.exe -m lat5.cli collect --db C:\trading_system\LAT_5.0\data\lat5_market.db --watchlist C:\trading_system\LAT_5.0\LAT_SIMPLE_v1.0_Watchlist.md --env C:\trading_system\LAT_5.0\.env --token-cache C:\trading_system\LAT_5.0\data\kiwoom_token_cache.json --base-date 20260827
+{"status": "COMPLETE", "run_id": 24, "symbols": 154, "success_symbols": 154, "api_errors": 0}
+$ C:\Users\User\AppData\Local\Programs\Python\Python313\python.exe -m lat5.cli data-health --db C:\trading_system\LAT_5.0\data\lat5_market.db --watchlist C:\trading_system\LAT_5.0\LAT_SIMPLE_v1.0_Watchlist.md --output-dir C:\trading_system\LAT_5.0
+{"status": "PASS", "json": "C:\\trading_system\\LAT_5.0\\artifacts\\data_health_latest.json", "report": "C:\\trading_system\\LAT_5.0\\reports\\data_health_latest.md"}
+$ C:\Users\User\AppData\Local\Programs\Python\Python313\python.exe C:\trading_system\LAT_5.0\scripts\filter_monthly10_weekly5.py --db C:\trading_system\LAT_5.0\data\lat5_market.db --watchlist C:\trading_system\LAT_5.0\LAT_SIMPLE_v1.0_Watchlist.md --as-of 2026-08-27
+output=C:\trading_system\LAT_5.0\reports\monthly_weekly_filter\2026-08-27.md
+as_of=2026-08-27 universe=154 matches=27
+240810	원익IPS
+084370	유진테크
+403870	HPSP
+140860	파크시스템스
+039030	이오테크닉스
+089030	테크윙
+356860	티엘비
+066970	엘앤에프
+006400	삼성SDI
+012450	한화에어로스페이스
+000810	삼성화재
+196170	알테오젠
+128940	한미약품
+298040	효성중공업
+267270	HD현대건설기계
+241560	두산밥캣
+006260	LS
+047040	대우건설
+000720	현대건설
+064400	LG CNS
+327260	RF머트리얼즈
+138080	오이솔루션
+064760	티씨케이
+413630	씨피시스템
+067310	하나마이크론
+330860	네패스아크
+010060	OCI홀딩스
+$ C:\Users\User\AppData\Local\Programs\Python\Python313\python.exe C:\trading_system\LAT_5.0\scripts\scan_trendline_rank.py --db C:\trading_system\LAT_5.0\data\lat5_market.db --watchlist C:\trading_system\LAT_5.0\LAT_SIMPLE_v1.0_Watchlist.md --as-of 2026-08-27
+output=C:\trading_system\LAT_5.0\reports\trendline_rank\2026-08-27.md
+signals=0 selected=0
+$ C:\Users\User\AppData\Local\Programs\Python\Python313\python.exe -m lat5.cli backtest --source-db C:\trading_system\LAT_5.0\data\lat5_market.db --watchlist C:\trading_system\LAT_5.0\LAT_SIMPLE_v1.0_Watchlist.md --output-dir C:\trading_system\LAT_5.0\artifacts\latest_scoring --strategy hourly-pullback-reversal --location-filter --start 2026-06-28 --end 2026-08-27 --overwrite
+{"summary": {"trades": 0, "win_rate": 0.0, "profit_factor": 0.0, "expectancy": 0.0, "net_pnl": 0.0, "return_pct": 0.0, "max_drawdown": 0.0}, "output_dir": "C:\\trading_system\\LAT_5.0\\artifacts\\latest_scoring"}
+$ C:\Users\User\AppData\Local\Programs\Python\Python313\python.exe C:\trading_system\LAT_5.0\scripts\build_dashboard.py
+C:\trading_system\LAT_5.0\dashboard\index.html
+=== run result=COMPLETE ===
