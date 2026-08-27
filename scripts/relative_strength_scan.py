@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 from lat5.data import KiwoomDataStore, parse_watchlist
 from lat5.relative_strength import market_average_return, relative_strength
 
 DAYS = 20
+JSON_OUTPUT = Path("artifacts") / "latest_scoring" / "relative_strength.json"
 
 
 def main() -> int:
@@ -60,6 +62,32 @@ def main() -> int:
             f"{result.market_return * 100:.2f}% | {result.rs * 100:+.2f}%p |"
         )
     out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    JSON_OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+    JSON_OUTPUT.write_text(
+        json.dumps(
+            {
+                "as_of": args.as_of,
+                "days": args.days,
+                "market_proxy_method": "watchlist_equal_weight_v1",
+                "market_return": market_return,
+                "universe_size": len(frames),
+                "rows": [
+                    {
+                        "ticker": ticker,
+                        "name": name,
+                        "stock_return": result.stock_return,
+                        "market_return": result.market_return,
+                        "rs": result.rs,
+                    }
+                    for ticker, name, result in rows
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     print(f"output={out_path}")
     return 0
 
