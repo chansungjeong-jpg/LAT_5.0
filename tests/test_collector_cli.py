@@ -1,11 +1,15 @@
 import json
+import sqlite3
 from datetime import datetime
+
+import pytest
 
 from lat5.cli import build_parser, main
 from lat5.collector_store import CollectorStore
 from lat5.data import WatchItem
 from lat5.data_health import build_data_health
 from lat5.lat_credentials import CredentialsError
+from lat5.token_provider import TokenSnapshot
 
 
 def test_collect_parser_supports_probe_and_selects_samsung_only():
@@ -126,3 +130,46 @@ def test_data_health_does_not_treat_single_ticker_run_as_full_collection(tmp_pat
     assert health["latest_collection_scope_ok"] is False
     assert health["latest_collection_complete"] is False
     assert health["status"] == "FAIL"
+
+
+def test_collect_closes_run_as_blocked_instead_of_leaving_it_running_forever(
+    monkeypatch, tmp_path, capsys
+):
+    """Regression: 2026-08-27's ReadTimeout crash propagated straight out of
+    collect_watchlist and left the run row stuck at status=RUNNING forever,
+    since only KiwoomTokenError was ever caught here."""
+    watchlist = tmp_path / "watch.md"
+    watchlist.write_text(
+        "## 3. Core Watchlist\n\n| 우선순위 | 종목명 | 코드 | 역할 |\n"
+        "|---:|---|---:|---|\n| 1 | Samsung | 005930 | test |\n",
+        encoding="utf-8",
+    )
+    db = tmp_path / "market.db"
+    monkeypatch.setattr("lat5.cli.load_credentials", lambda path: object())
+    monkeypatch.setattr(
+        "lat5.cli.get_lat_token",
+        lambda credentials, cache: TokenSnapshot("tok", datetime(2026, 8, 27), tmp_path / "t.json"),
+    )
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("read timed out")
+
+    monkeypatch.setattr("lat5.cli.collect_watchlist", _boom)
+
+    with pytest.raises(RuntimeError, match="read timed out"):
+        main([
+            "collect", "--db", str(db), "--watchlist", str(watchlist),
+            "--env", str(tmp_path / ".env"), "--token-cache", str(tmp_path / "token.json"),
+        ])
+
+    assert json.loads(capsys.readouterr().out)["status"] == "BLOCKED"
+    con = sqlite3.connect(db)
+    status, error_count = con.execute(
+        "SELECT status, error_count FROM collection_runs ORDER BY run_id DESC LIMIT 1"
+    ).fetchone()
+    assert status == "BLOCKED"
+    assert error_count == 1
+    message = con.execute(
+        "SELECT message FROM collection_errors ORDER BY id DESC LIMIT 1"
+    ).fetchone()[0]
+    assert "read timed out" in message

@@ -479,6 +479,17 @@ def _run_collect(args: argparse.Namespace) -> int:
             store.finish_run(run_id, "BLOCKED", 0, 1)
             print(json.dumps({"status": "BLOCKED", "run_id": run_id, "error": str(exc)}, ensure_ascii=False))
             return 2
+        except Exception as exc:
+            # Fail-closed bookkeeping: 2026-08-27's ReadTimeout crash left run
+            # 23 stuck at status=RUNNING forever because nothing here closed
+            # it out. Any exception this collect run didn't already turn into
+            # a clean per-symbol error (KiwoomApiError et al. are handled
+            # inside collect_symbol) still needs the run marked done -- with
+            # a real reason, not a bare traceback -- before it propagates.
+            store.record_error(run_id, "*", type(exc).__name__, "UNEXPECTED_ERROR", str(exc))
+            store.finish_run(run_id, "BLOCKED", 0, 1)
+            print(json.dumps({"status": "BLOCKED", "run_id": run_id, "error": str(exc)}, ensure_ascii=False))
+            raise
         success_count = result["success_symbols"]
         error_count = result["api_errors"]
         status = "COMPLETE" if error_count == 0 else "PARTIAL"
