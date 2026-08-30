@@ -63,6 +63,10 @@ def build_pipeline_commands(
             "--start", backtest_start, "--end", as_of, "--overwrite",
         ],
         [
+            python, str(root / "scripts" / "relative_strength_scan.py"),
+            "--db", str(db), "--watchlist", str(watchlist), "--as-of", as_of,
+        ],
+        [
             python, str(root / "scripts" / "build_dashboard.py"),
         ],
     ]
