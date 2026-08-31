@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from datetime import date
 from pathlib import Path
@@ -70,6 +71,31 @@ def main() -> int:
     if not matches:
         lines.append("| - | 해당 없음 | - | - | - | - |")
     output.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    json_output = PROJECT_ROOT / "artifacts" / "latest_scoring" / "monthly_weekly_filter.json"
+    json_output.parent.mkdir(parents=True, exist_ok=True)
+    json_output.write_text(
+        json.dumps(
+            {
+                "as_of": as_of.date().isoformat(),
+                "universe_size": len(items),
+                "rows": [
+                    {
+                        "ticker": item.ticker,
+                        "name": item.name,
+                        "sector": item.sector,
+                        "provisional": provisional,
+                        "weekly_recovery": f"{weekly['previous_period']} → {weekly['current_period']}",
+                        "monthly_recovery": f"{monthly['previous_period']} → {monthly['current_period']}",
+                    }
+                    for item, weekly, monthly, provisional in matches
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     print(f"output={output}")
     print(f"as_of={as_of.date()} universe={len(items)} matches={len(matches)}")
     for item, _, _, _ in matches:
