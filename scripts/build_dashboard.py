@@ -40,6 +40,19 @@ def _pct(value: object, default: str = "-") -> str:
     return html.escape(f"{float(value) * 100:+.2f}%p")
 
 
+def _volume_text(ratio: object) -> str:
+    if ratio is None:
+        return "-"
+    value = float(ratio)
+    if value >= 1.2:
+        label = "증가"
+    elif value >= 0.8:
+        label = "보통"
+    else:
+        label = "감소"
+    return html.escape(f"{value:.2f}배({label})")
+
+
 def _render_candidate_board(
     filter_path: Path, rs_path: Path, location_decisions: list[dict]
 ) -> str:
@@ -71,6 +84,7 @@ def _render_candidate_board(
             f"<td>{rank}</td>"
             f"<td><strong>{_text(row.ticker)}</strong><br><small>{_text(row.name)}</small></td>"
             f"<td>{_text(row.sector)}</td>"
+            f"<td>{_volume_text(row.volume_ratio)}</td>"
             f"<td class=score>{_pct(row.rs)}</td>"
             f"<td>{_text(row.location_score)}</td>"
             f"<td>{_text(row.final_state)}</td>"
@@ -85,9 +99,9 @@ def _render_candidate_board(
     return f"""
 <section class="panel board-panel">
 <h2>오늘의 관찰 후보 — {_text(filter_payload.get('as_of'))} ({len(board)}종목)</h2>
-<table><thead><tr><th>순위</th><th>종목</th><th>섹터</th><th>RS(시장대비)</th><th>위치점수</th>
+<table><thead><tr><th>순위</th><th>종목</th><th>섹터</th><th>거래량(7일평균대비)</th><th>RS(시장대비)</th><th>위치점수</th>
 <th>상태</th><th>매수</th><th>저항돌파 진입가</th><th>RR</th><th>차단 사유</th></tr></thead>
-<tbody>{"".join(rendered) or '<tr><td colspan="10">1차 필터 통과 종목 없음</td></tr>'}</tbody></table>
+<tbody>{"".join(rendered) or '<tr><td colspan="11">1차 필터 통과 종목 없음</td></tr>'}</tbody></table>
 <div class="note">
 <strong>이 표는 매수확률 순위가 아니다.</strong> final_spec 2장이 Probability Score·Expected
 Value를 검증 전까지 배제하고 있고, 패턴확률 스캐너도 현재 154종목 중 통계적으로

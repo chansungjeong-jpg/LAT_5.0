@@ -12,6 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from lat5.data import KiwoomDataStore, parse_watchlist  # noqa: E402
+from lat5.location_decision import daily_volume_ratio  # noqa: E402
 from lat5.monthly_weekly_filter import (  # noqa: E402
     periods_as_of,
     recent_recovery,
@@ -32,7 +33,7 @@ def main() -> int:
     args = parser.parse_args()
     as_of = pd.Timestamp(args.as_of)
     items = {item.ticker: item for item in parse_watchlist(args.watchlist)}
-    matches: list[tuple[object, dict[str, object], dict[str, object]]] = []
+    matches: list[tuple[object, dict[str, object], dict[str, object], bool, float | None]] = []
 
     with KiwoomDataStore(args.db) as store:
         for item in items.values():
@@ -43,8 +44,15 @@ def main() -> int:
                     monthly.index[-1].to_period("M") == as_of.to_period("M")
                     or weekly.index[-1] > as_of
                 )
+                volume_ratio = daily_volume_ratio(daily.sort_index())
                 matches.append(
-                    (item, recovery_details(weekly, 5), recovery_details(monthly, 10), provisional)
+                    (
+                        item,
+                        recovery_details(weekly, 5),
+                        recovery_details(monthly, 10),
+                        provisional,
+                        volume_ratio,
+                    )
                 )
 
     output_dir = Path(args.output_dir)
@@ -59,17 +67,18 @@ def main() -> int:
         f"대상 종목: {len(items)}개",
         f"통과 종목: {len(matches)}개",
         "",
-        "| 코드 | 종목 | 섹터 | 상태 | 주봉 회복 | 월봉 회복 |",
-        "|---|---|---|---|---|---|",
+        "| 코드 | 종목 | 섹터 | 상태 | 주봉 회복 | 월봉 회복 | 거래량비율(7일평균대비) |",
+        "|---|---|---|---|---|---|---:|",
     ]
-    for item, weekly, monthly, provisional in matches:
+    for item, weekly, monthly, provisional, volume_ratio in matches:
+        volume_text = f"{volume_ratio:.2f}배" if volume_ratio is not None else "-"
         lines.append(
             f"| {item.ticker} | {item.name} | {item.sector} | {'잠정' if provisional else '확정'} | "
             f"{weekly['previous_period']} → {weekly['current_period']} | "
-            f"{monthly['previous_period']} → {monthly['current_period']} |"
+            f"{monthly['previous_period']} → {monthly['current_period']} | {volume_text} |"
         )
     if not matches:
-        lines.append("| - | 해당 없음 | - | - | - | - |")
+        lines.append("| - | 해당 없음 | - | - | - | - | - |")
     output.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     json_output = PROJECT_ROOT / "artifacts" / "latest_scoring" / "monthly_weekly_filter.json"
@@ -87,8 +96,9 @@ def main() -> int:
                         "provisional": provisional,
                         "weekly_recovery": f"{weekly['previous_period']} → {weekly['current_period']}",
                         "monthly_recovery": f"{monthly['previous_period']} → {monthly['current_period']}",
+                        "volume_ratio": volume_ratio,
                     }
-                    for item, weekly, monthly, provisional in matches
+                    for item, weekly, monthly, provisional, volume_ratio in matches
                 ],
             },
             ensure_ascii=False,
@@ -98,7 +108,7 @@ def main() -> int:
     )
     print(f"output={output}")
     print(f"as_of={as_of.date()} universe={len(items)} matches={len(matches)}")
-    for item, _, _, _ in matches:
+    for item, _, _, _, _ in matches:
         print(f"{item.ticker}\t{item.name}")
     return 0
 

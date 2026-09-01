@@ -19,6 +19,19 @@ def test_n_day_return_compares_latest_close_to_n_sessions_back():
     assert n_day_return(daily, days=5) == pytest.approx(0.10)
 
 
+def test_n_day_return_skips_a_pre_market_placeholder_session():
+    """Regression: 2026-09-01 -- collecting before market open leaves a
+    trailing row with volume=0 and close carried forward from the prior
+    day, which silently shifted the whole N-day window back by one
+    session instead of using the actual latest completed close."""
+    index = pd.date_range("2026-01-02", periods=12, freq="B")
+    closes = [100.0] * 10 + [110.0, 110.0]
+    volumes = [1000.0] * 11 + [0.0]
+    daily = pd.DataFrame({"close": closes, "volume": volumes}, index=index)
+
+    assert n_day_return(daily, days=5) == pytest.approx(0.10)
+
+
 def test_n_day_return_none_when_not_enough_history():
     daily = _daily([100.0] * 5)
 

@@ -5,9 +5,27 @@ from lat5.candidate_board import build_candidate_board
 
 def _filter_rows():
     return [
-        {"ticker": "000111", "name": "가나전자", "sector": "반도체", "provisional": True},
-        {"ticker": "000222", "name": "나다화학", "sector": "화학", "provisional": False},
-        {"ticker": "000333", "name": "다라로봇", "sector": "로봇", "provisional": True},
+        {
+            "ticker": "000111",
+            "name": "가나전자",
+            "sector": "반도체",
+            "provisional": True,
+            "volume_ratio": 1.8,
+        },
+        {
+            "ticker": "000222",
+            "name": "나다화학",
+            "sector": "화학",
+            "provisional": False,
+            "volume_ratio": None,
+        },
+        {
+            "ticker": "000333",
+            "name": "다라로봇",
+            "sector": "로봇",
+            "provisional": True,
+            "volume_ratio": 0.6,
+        },
     ]
 
 
@@ -96,3 +114,12 @@ def test_board_keeps_the_latest_decision_when_a_symbol_has_several():
 
 def test_empty_filter_result_produces_empty_board():
     assert build_candidate_board(filter_rows=[], rs_rows=_rs_rows()) == []
+
+
+def test_board_carries_the_filter_stage_volume_ratio_unchanged():
+    board = build_candidate_board(filter_rows=_filter_rows(), rs_rows=_rs_rows())
+
+    by_ticker = {row.ticker: row for row in board}
+    assert by_ticker["000111"].volume_ratio == pytest.approx(1.8)
+    assert by_ticker["000333"].volume_ratio == pytest.approx(0.6)
+    assert by_ticker["000222"].volume_ratio is None

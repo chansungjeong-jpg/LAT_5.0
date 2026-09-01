@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from lat5.data import aggregate_weekly
+from lat5.data import aggregate_weekly, drop_incomplete_trailing_session
 from lat5.daily_ma_reaction import score_daily_reaction, wilder_rsi14
 from lat5.hourly_abc_support import find_five_minute_reversal_entry, find_hourly_ma60_pullback, strong_hourly_breakout_at
 from lat5.location_score import evaluate_daily_ma_reaction_gate
@@ -105,6 +105,24 @@ def _decline_rebound_slope_signal(daily: pd.DataFrame) -> tuple[float | None, st
     if ratio >= 1.0:
         return ratio, "REBOUND_STEEPER_THAN_DECLINE", 5
     return ratio, "REBOUND_SHALLOWER_THAN_DECLINE", 0
+
+
+def daily_volume_ratio(daily: pd.DataFrame) -> float | None:
+    """Latest completed daily volume vs. the mean of the prior 7 completed
+    sessions (today excluded) -- the same smart-money-inflow ratio the
+    position score's volume component is based on (final_spec 9.2). None
+    when fewer than 8 sessions of history exist.
+    """
+    if "volume" not in daily.columns:
+        return None
+    daily = drop_incomplete_trailing_session(daily)
+    if len(daily) < 8:
+        return None
+    volume = daily["volume"].astype(float)
+    baseline_mean = float(volume.iloc[-8:-1].mean())
+    if baseline_mean <= 0:
+        return None
+    return float(volume.iloc[-1]) / baseline_mean
 
 
 def _daily_volume_score(ratio: float | None) -> int:
@@ -279,11 +297,9 @@ def build_context(
         ctx["daily_bull_count_5"] = int(bull.iloc[-5:].sum())
         ctx["daily_bull_count_10"] = int(bull.iloc[-10:].sum())
 
-    if len(prior_daily) >= 8:
-        volume = prior_daily["volume"].astype(float)
-        baseline_mean = float(volume.iloc[-8:-1].mean())
-        if baseline_mean > 0:
-            ctx["daily_volume_ratio"] = float(volume.iloc[-1]) / baseline_mean
+    volume_ratio = daily_volume_ratio(prior_daily)
+    if volume_ratio is not None:
+        ctx["daily_volume_ratio"] = volume_ratio
 
     prior_hourly = (
         hourly.loc[hourly.index + pd.Timedelta(hours=1) <= bar_cutoff]

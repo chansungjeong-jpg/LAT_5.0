@@ -147,6 +147,24 @@ def aggregate_60m(bars: pd.DataFrame) -> pd.DataFrame:
     ).rename_axis("datetime")
 
 
+def drop_incomplete_trailing_session(daily: pd.DataFrame) -> pd.DataFrame:
+    """Drop trailing rows with zero volume -- a not-yet-traded placeholder
+    session (open=high=low=close carried forward from the prior close,
+    volume=0) that Kiwoom returns when a symbol is collected before that
+    day's market open. Without this, "today" silently becomes a zero and
+    corrupts any same-day ratio (volume ratio, N-day return) computed
+    against it. Only trims from the end; a genuine zero-volume day buried
+    earlier in history is left alone.
+    """
+    if daily.empty or "volume" not in daily.columns:
+        return daily
+    volume = daily["volume"].astype(float)
+    cutoff = len(volume)
+    while cutoff > 0 and volume.iloc[cutoff - 1] == 0:
+        cutoff -= 1
+    return daily.iloc[:cutoff]
+
+
 def aggregate_weekly(daily: pd.DataFrame) -> pd.DataFrame:
     """Aggregate daily bars into Friday-labelled weekly bars."""
     if daily.empty:

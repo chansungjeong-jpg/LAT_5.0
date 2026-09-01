@@ -6,6 +6,7 @@ import pytest
 from lat5.location_decision import (
     LocationScoreConfig,
     build_context,
+    daily_volume_ratio,
     evaluate_watchlist_position,
 )
 
@@ -582,3 +583,31 @@ def test_evaluator_component_matches_detected_reaction_payload_score(
     assert result["daily_ma_reaction"]["score"] == expected_component
     assert result["score_components"]["daily_ma_reaction"] == expected_component
     assert result["state"] == expected_state
+
+
+def test_daily_volume_ratio_compares_latest_bar_to_prior_seven_session_mean():
+    daily = pd.DataFrame({"volume": [100.0] * 7 + [150.0]})
+
+    assert daily_volume_ratio(daily) == pytest.approx(1.5)
+
+
+def test_daily_volume_ratio_none_below_eight_sessions():
+    daily = pd.DataFrame({"volume": [100.0] * 7})
+
+    assert daily_volume_ratio(daily) is None
+
+
+def test_daily_volume_ratio_none_when_baseline_is_zero():
+    daily = pd.DataFrame({"volume": [0.0] * 7 + [150.0]})
+
+    assert daily_volume_ratio(daily) is None
+
+
+def test_daily_volume_ratio_skips_a_pre_market_placeholder_session():
+    """Regression: 2026-09-01 -- a symbol collected before that day's
+    market open comes back with a same-day row of volume=0 (not-yet-traded
+    placeholder), which previously got treated as "today" and divided by
+    zero into a ratio of exactly 0.0 for every single candidate."""
+    daily = pd.DataFrame({"volume": [100.0] * 7 + [150.0, 0.0]})
+
+    assert daily_volume_ratio(daily) == pytest.approx(1.5)

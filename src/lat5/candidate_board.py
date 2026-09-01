@@ -9,6 +9,7 @@ class CandidateRow:
     name: str
     sector: str
     provisional: bool
+    volume_ratio: float | None
     rs: float | None
     stock_return: float | None
     location_score: int | None = None
@@ -71,6 +72,7 @@ def build_candidate_board(
                 name=str(row.get("name", "")),
                 sector=str(row.get("sector", "")),
                 provisional=bool(row.get("provisional", False)),
+                volume_ratio=row.get("volume_ratio"),
                 rs=rs_row.get("rs"),
                 stock_return=rs_row.get("stock_return"),
                 location_score=int(location_score) if location_score is not None else None,

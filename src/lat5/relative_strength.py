@@ -4,11 +4,19 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from lat5.data import drop_incomplete_trailing_session
+
 
 def n_day_return(daily: pd.DataFrame, *, days: int) -> float | None:
     """Percent return of the latest completed close vs. the close `days`
     trading sessions earlier. None when there isn't enough history.
+
+    Drops a trailing not-yet-traded placeholder session first (see
+    `drop_incomplete_trailing_session`) -- otherwise "today" silently
+    becomes yesterday's close carried forward with zero volume, which
+    doesn't crash but quietly shifts the whole return window back a day.
     """
+    daily = drop_incomplete_trailing_session(daily)
     close = daily["close"].astype(float)
     if len(close) < days + 1:
         return None
