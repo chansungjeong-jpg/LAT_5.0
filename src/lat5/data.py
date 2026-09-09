@@ -126,6 +126,20 @@ class KiwoomDataStore:
         frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
         return frame.dropna(subset=["date"]).set_index("date").sort_index()
 
+    def load_execution_strength(self, ticker: str) -> pd.DataFrame:
+        columns = self._columns("execution_strength")
+        provider_filter = " AND provider='kiwoom'" if "provider" in columns else ""
+        frame = pd.read_sql_query(
+            f"""SELECT datetime, strength FROM execution_strength
+                WHERE ticker=?{provider_filter} ORDER BY datetime""",
+            self.conn,
+            params=(ticker,),
+        )
+        if frame.empty:
+            return frame
+        frame["datetime"] = pd.to_datetime(frame["datetime"], errors="coerce")
+        return frame.dropna(subset=["datetime"]).set_index("datetime").sort_index()
+
 
 def aggregate_60m(bars: pd.DataFrame) -> pd.DataFrame:
     if bars.empty:
