@@ -156,11 +156,19 @@ def build_dashboard(
     rs_path: Path = RS_INPUT,
     filter_path: Path = FILTER_INPUT,
 ) -> Path:
+    from lat5.candidate_board import latest_decision_by_symbol
+
     payload = json.loads(input_path.read_text(encoding="utf-8"))
     diagnostics = payload.get("diagnostics", {})
     rows = [row for row in diagnostics.get("location_decisions", []) if isinstance(row, dict)]
     eligible_count = sum(row.get("entry_eligible") is True for row in rows)
     board_section = _render_candidate_board(filter_path, rs_path, rows)
+    # location_decisions is an event log (one row per historical pullback
+    # confirmation) -- the same symbol can appear many times with different
+    # scores from different dates. Dedup to each symbol's latest decision
+    # before ranking, the same rule the candidate board above already uses,
+    # otherwise a symbol can show up twice in the Top 20 with two scores.
+    rows = list(latest_decision_by_symbol(rows).values())
     rows.sort(key=lambda row: float(row.get("location_score", -1)), reverse=True)
     rows = rows[:20]
 

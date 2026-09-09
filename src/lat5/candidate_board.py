@@ -20,7 +20,7 @@ class CandidateRow:
     breakout_rr: float | None = None
 
 
-def _latest_decision_by_symbol(
+def latest_decision_by_symbol(
     location_decisions: list[dict],
 ) -> dict[str, dict]:
     latest: dict[str, dict] = {}
@@ -58,7 +58,7 @@ def build_candidate_board(
     leave everything unmeasured as None.
     """
     rs_by_ticker = {str(row.get("ticker", "")): row for row in rs_rows}
-    decisions = _latest_decision_by_symbol(location_decisions or [])
+    decisions = latest_decision_by_symbol(location_decisions or [])
 
     board: list[CandidateRow] = []
     for row in filter_rows:
