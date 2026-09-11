@@ -9,6 +9,7 @@ from lat5.edge_validation import (
     evaluate_flow_signal,
     evaluate_location,
     evaluate_recovery,
+    evaluate_rsi_recovery_signal,
     resolve_entry,
     resolve_entry_close,
     resolve_outcome,
@@ -496,3 +497,66 @@ def test_resolve_outcome_close_to_open_data_gap_when_ticker_stopped_reporting():
 
     assert outcome.status == "DATA_GAP"
     assert outcome.gross_return is None
+
+
+# ---------------------------------------------------------------------------
+# RSI recovery signal (H-003, see .claude/skills/edge-loop/research_log/hypotheses.md)
+# ---------------------------------------------------------------------------
+
+
+def _daily_close_frame(closes: list[float], *, start: str = "2026-06-01") -> pd.DataFrame:
+    index = pd.date_range(start, periods=len(closes), freq="B")
+    return pd.DataFrame({"close": closes}, index=index)
+
+
+def test_evaluate_rsi_recovery_signal_true_when_previous_oversold_and_current_recovers():
+    # 16 strictly declining bars (previous-day RSI == 0.0, deeply oversold),
+    # then a large up day for the as-of (current) bar.
+    declining = [100.0 - i for i in range(16)]
+    daily_trunc = _daily_close_frame(declining + [declining[-1] + 20.0])
+
+    result = evaluate_rsi_recovery_signal(daily_trunc, as_of=daily_trunc.index[-1])
+
+    assert result.rsi14_prev == pytest.approx(0.0)
+    assert result.rsi14 == pytest.approx(60.6060606060606)
+    assert result.signal is True
+    assert result.reason is None
+
+
+def test_evaluate_rsi_recovery_signal_false_when_no_crossing():
+    # Flat closes -> RSI stays near the midline on both days, no threshold crossed.
+    flat = [100.0] * 17
+    daily_trunc = _daily_close_frame(flat)
+
+    result = evaluate_rsi_recovery_signal(daily_trunc, as_of=daily_trunc.index[-1])
+
+    assert result.signal is False
+    assert result.reason is None
+
+
+def test_evaluate_rsi_recovery_signal_none_when_insufficient_bars():
+    # Wilder RSI(14) needs at least 15 bars for the previous-day value and
+    # 16 for the current -- 10 bars is not enough for either.
+    daily_trunc = _daily_close_frame([100.0 + i for i in range(10)])
+
+    result = evaluate_rsi_recovery_signal(daily_trunc, as_of=daily_trunc.index[-1])
+
+    assert result.signal is None
+    assert result.rsi14 is None
+    assert result.reason == "RSI_DATA_MISSING"
+
+
+def test_evaluate_rsi_recovery_signal_is_invariant_to_future_rows_via_caller_truncation():
+    """Same contract as evaluate_recovery/evaluate_flow_signal: whatever the
+    caller truncates to before calling must fully determine the result --
+    rows appended after as_of in the untruncated source must not change it."""
+    declining = [100.0 - i for i in range(16)]
+    full = declining + [declining[-1] + 20.0, 999.0, 999.0]
+    daily_full = _daily_close_frame(full)
+    as_of = daily_full.index[16]
+
+    baseline = evaluate_rsi_recovery_signal(truncate_daily(daily_full.iloc[:17], as_of), as_of=as_of)
+    with_future = evaluate_rsi_recovery_signal(truncate_daily(daily_full, as_of), as_of=as_of)
+
+    assert baseline == with_future
+    assert with_future.signal is True

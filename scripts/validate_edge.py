@@ -115,6 +115,10 @@ def _snapshot_row(record: TickerDayRecord) -> dict[str, object]:
         "flow_foreign_net_lookback_days": record.flow.foreign_net_lookback_days,
         "flow_strength_mean": record.flow.strength_mean,
         "flow_reason": record.flow.reason,
+        "rsi14": record.rsi.rsi14,
+        "rsi14_prev": record.rsi.rsi14_prev,
+        "rsi_signal": record.rsi.signal,
+        "rsi_reason": record.rsi.reason,
         "entry_status": record.entry.status,
         "entry_date": (
             record.entry.entry_date.date().isoformat() if record.entry.entry_date is not None else None

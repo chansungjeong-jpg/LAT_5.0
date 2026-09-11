@@ -7,6 +7,7 @@ from lat5.edge_validation import (
     LocationResult,
     OutcomeResult,
     RecoveryResult,
+    RSIRecoveryResult,
     TickerDayRecord,
 )
 from lat5.edge_validation_stats import (
@@ -23,6 +24,7 @@ _NO_RECOVERY = RecoveryResult(False, None, None, None, "NOT_RECOVERED")
 _NO_LOCATION = LocationResult(None, None, (), None, False, (), None)
 _NO_ENTRY = EntryResult("UNFILLED", None, None, None, "NO_NEXT_SESSION_IN_CALENDAR")
 _NO_FLOW = FlowResult(None, 5, None, "FLOW_DATA_MISSING")
+_NO_RSI = RSIRecoveryResult(None, None, None, "RSI_DATA_MISSING")
 _PASS_RECOVERY = RecoveryResult(True, False, None, None, None)
 
 
@@ -40,7 +42,7 @@ def _record(day: str, ticker: str, hold_days: int, outcome: OutcomeResult | None
         recovery=_NO_RECOVERY, rs=None, stock_return=None, location=_NO_LOCATION,
         entry=_NO_ENTRY, outcomes=outcomes,
         entry_close=_NO_ENTRY, outcomes_close_to_open={},
-        flow=_NO_FLOW,
+        flow=_NO_FLOW, rsi=_NO_RSI,
     )
 
 
@@ -170,7 +172,17 @@ def _flow_record(day: str, ticker: str, *, foreign_net: float, strength: float, 
         recovery=_PASS_RECOVERY, rs=None, stock_return=None, location=_NO_LOCATION,
         entry=_NO_ENTRY, outcomes={10: _mature(gross)},
         entry_close=_NO_ENTRY, outcomes_close_to_open={},
-        flow=FlowResult(foreign_net, 5, strength, None),
+        flow=FlowResult(foreign_net, 5, strength, None), rsi=_NO_RSI,
+    )
+
+
+def _rsi_record(day: str, ticker: str, *, signal: bool, gross: float) -> TickerDayRecord:
+    return TickerDayRecord(
+        eval_day=pd.Timestamp(day), ticker=ticker, name=ticker, sectors=(),
+        recovery=_PASS_RECOVERY, rs=None, stock_return=None, location=_NO_LOCATION,
+        entry=_NO_ENTRY, outcomes={10: _mature(gross)},
+        entry_close=_NO_ENTRY, outcomes_close_to_open={},
+        flow=_NO_FLOW, rsi=RSIRecoveryResult(50.0, 25.0, signal, None),
     )
 
 
@@ -200,3 +212,23 @@ def test_build_comparisons_ranks_foreign_and_strength_tertiles_per_day():
     # in this fixture), so its top tertile should be the *worst* returns.
     assert stage["strength_top"].n_observations == 2
     assert stage["strength_top"].mean_gross_pooled == pytest.approx((0.02 + 0.01) / 2)
+
+
+def test_build_comparisons_splits_rsi_recovery_vs_no_recovery():
+    day = "2026-08-13"
+    records = [
+        _rsi_record(day, "A", signal=True, gross=0.05),
+        _rsi_record(day, "B", signal=True, gross=0.03),
+        _rsi_record(day, "C", signal=False, gross=0.01),
+        _rsi_record(day, "D", signal=False, gross=-0.01),
+    ]
+    eval_days = [pd.Timestamp(day)]
+    calendar = [pd.Timestamp(day)]
+
+    comparisons = build_comparisons(records, eval_days, calendar, holds=(10,), rs_days=20)
+
+    stage = comparisons["hold_10"]
+    assert stage["rsi_recovery"].n_observations == 2
+    assert stage["rsi_recovery"].mean_gross_pooled == pytest.approx((0.05 + 0.03) / 2)
+    assert stage["rsi_no_recovery"].n_observations == 2
+    assert stage["rsi_no_recovery"].mean_gross_pooled == pytest.approx((0.01 + -0.01) / 2)

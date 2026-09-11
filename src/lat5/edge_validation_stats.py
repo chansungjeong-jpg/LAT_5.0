@@ -190,6 +190,7 @@ def build_comparisons(
             "rr_pass", "rr_blocked", "rr_unmeasured",
             "foreign_top", "foreign_mid", "foreign_bottom",
             "strength_top", "strength_mid", "strength_bottom",
+            "rsi_recovery", "rsi_no_recovery",
         )
     }
     veto_lists: list[tuple[str, ...]] = []
@@ -243,6 +244,10 @@ def build_comparisons(
             groups["strength_mid"].add((day, ticker))
         for ticker in bottom_strength:
             groups["strength_bottom"].add((day, ticker))
+
+        rsi_known = [(r.ticker, r.rsi.signal) for r in cohort if r.rsi.signal is not None]
+        for ticker, signal in rsi_known:
+            groups["rsi_recovery" if signal else "rsi_no_recovery"].add((day, ticker))
 
         for record in cohort:
             if record.location.score is None:

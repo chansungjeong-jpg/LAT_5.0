@@ -23,6 +23,7 @@ from lat5.location_decision import (
     build_context,
     evaluate_watchlist_position,
 )
+from lat5.daily_ma_reaction import wilder_rsi14
 from lat5.monthly_weekly_filter import periods_as_of, recent_recovery, recovery_details
 from lat5.relative_strength import market_average_return, n_day_return, relative_strength
 
@@ -311,6 +312,61 @@ def evaluate_flow_signal(
 
 
 # ---------------------------------------------------------------------------
+# RSI(14) recovery signal (H-003, see
+# .claude/skills/edge-loop/research_log/hypotheses.md)
+#
+# daily_ma_reaction.py computes rsi14 as pure observation (score/gate logic
+# was deliberately removed in 5168ec9 "keep rsi as observation only" without
+# numeric validation) -- this reuses that same tested Wilder calculation
+# (wilder_rsi14) to test one specific, pre-registered reading of it: did the
+# completed as-of bar's RSI cross up through 30 or 40 from the prior
+# completed bar. It does not reintroduce any scoring/gating behavior into
+# daily_ma_reaction.py itself.
+# ---------------------------------------------------------------------------
+
+RSI_OVERSOLD_THRESHOLD_DEFAULT = 30.0
+RSI_RECOVERY_THRESHOLD_DEFAULT = 40.0
+
+
+@dataclass(frozen=True)
+class RSIRecoveryResult:
+    rsi14: float | None  # as-of (current completed) bar
+    rsi14_prev: float | None  # prior completed bar
+    signal: bool | None  # True/False when both values are known, else None
+    reason: str | None
+
+
+_MISSING_RSI_RECOVERY = RSIRecoveryResult(None, None, None, "RSI_DATA_MISSING")
+
+
+def evaluate_rsi_recovery_signal(
+    daily_trunc: pd.DataFrame,
+    *,
+    as_of: pd.Timestamp,
+    oversold_threshold: float = RSI_OVERSOLD_THRESHOLD_DEFAULT,
+    recovery_threshold: float = RSI_RECOVERY_THRESHOLD_DEFAULT,
+) -> RSIRecoveryResult:
+    """`daily_trunc` must already be truncated by the caller (date <= as_of),
+    matching evaluate_recovery/evaluate_location/evaluate_flow_signal's
+    contract -- this function does not truncate. The as-of bar is the last
+    row of `daily_trunc`; the "previous" reading excludes it entirely, so
+    neither reading uses any bar after as_of.
+    """
+    if daily_trunc.empty or "close" not in daily_trunc.columns:
+        return _MISSING_RSI_RECOVERY
+    close = daily_trunc["close"].astype(float)
+    rsi_current = wilder_rsi14(close)
+    rsi_previous = wilder_rsi14(close.iloc[:-1])
+    if rsi_current is None or rsi_previous is None:
+        return RSIRecoveryResult(rsi_current, rsi_previous, None, "RSI_DATA_MISSING")
+
+    signal = (rsi_previous < oversold_threshold and rsi_current >= oversold_threshold) or (
+        rsi_previous < recovery_threshold and rsi_current >= recovery_threshold
+    )
+    return RSIRecoveryResult(rsi_current, rsi_previous, signal, None)
+
+
+# ---------------------------------------------------------------------------
 # Entry / outcome resolution (post-hoc; deliberately kept out of the
 # feature-snapshot code path above)
 # ---------------------------------------------------------------------------
@@ -492,6 +548,7 @@ class TickerDayRecord:
     entry_close: EntryResult
     outcomes_close_to_open: dict[int, OutcomeResult]
     flow: FlowResult
+    rsi: RSIRecoveryResult
 
 
 @dataclass(frozen=True)
@@ -547,6 +604,7 @@ def run_eval_day(
         recovery = evaluate_recovery(daily_trunc[item.ticker], eval_day)
         location = _MISSING_LOCATION
         flow = _MISSING_FLOW
+        rsi = _MISSING_RSI_RECOVERY
         if recovery.passed:
             minutes_trunc = truncate_minutes(minutes_full[item.ticker], cutoff)
             location = evaluate_location(
@@ -563,6 +621,7 @@ def run_eval_day(
                     as_of=eval_day,
                     lookback_days=cfg.flow_lookback_days,
                 )
+            rsi = evaluate_rsi_recovery_signal(daily_trunc[item.ticker], as_of=eval_day)
 
         entry = resolve_entry(daily_full[item.ticker], eval_day, calendar)
         outcomes: dict[int, OutcomeResult] = {}
@@ -611,6 +670,7 @@ def run_eval_day(
                 entry_close=entry_close,
                 outcomes_close_to_open=outcomes_close_to_open,
                 flow=flow,
+                rsi=rsi,
             )
         )
     return records
