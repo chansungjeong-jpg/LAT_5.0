@@ -41,4 +41,5 @@
 - 채택 기준: SKILL.md 규칙4 그대로.
 - train 구간: 2026-08-13 ~ 2026-09-04 (holdout 시작 전날까지)
 - holdout 구간: 2026-09-07 ~ 2026-09-11 (등록 시점 세션 캘린더 최근 5거래일 — 실행 시점에 최신 캘린더로 재확인할 것)
-- 상태: REGISTERED
+- train 실행(2026-09-11, `artifacts/edge_validation/h003_train_20260911/`): rsi_recovery n=1(H=10/H=5), n=0(H=20) — 표본 부족으로 holdout 진행 없이 train 단계에서 기각.
+- 상태: **RESOLVED — FAILED_TRAIN** (`failures.md` H-003 참고)

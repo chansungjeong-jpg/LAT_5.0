@@ -20,3 +20,12 @@
 - 기각 사유: SKILL.md 규칙4 "train·holdout 부호 일관" 이전에 train 내부(H=5 vs H=10)에서부터 부호가 갈림 — holdout까지 갈 필요 없이 여기서 기각(SKILL.md 절차 3단계).
 - 상세: `artifacts/edge_validation/h002_train_20260909/comparisons.json` → `next_open.hold_10/hold_5.foreign_top/foreign_bottom`
 - 교훈: 두 보유기간(H=5/H=10)에서 부호가 다르면 표본이 통계적으로 커 보여도(n=50~90) 노이즈일 확률이 높다 — 앞으로는 train 단계에서도 보조 보유기간과 부호 일치를 1차 체크리스트에 넣는다.
+
+---
+
+**[H-003] RSI(14) 완료봉 회복 신호(전일<30→당일≥30 또는 전일<40→당일≥40)**
+
+- train 구간(2026-08-13~09-04) 결과: `rsi_recovery` 그룹(회복 통과군 내 RSI 회복 신호 발생) n=1(H=10), n=1(H=5), n=0(H=20). `rsi_no_recovery` 대조군은 n=241~293으로 정상.
+- 기각 사유: SKILL.md 규칙4(부호 일관·독립블록≥2·net 개선) 판정 이전 단계 — n=1은 평균·부호·독립블록 어느 것도 계산할 표본이 아니다. holdout까지 갈 필요 없이 train 단계에서 기각(SKILL.md 절차 3단계).
+- 상세: `artifacts/edge_validation/h003_train_20260911/comparisons.json` → `next_open.hold_10/hold_5/hold_20.rsi_recovery`
+- 교훈: 임계값 상향/하향 돌파(30/40 크로스) 같은 "사건형" 신호는 154종목×3주 같은 좁은 표본에서 거의 발생하지 않는다 — 사전등록 전에 같은 기간 발생 빈도를 먼저 세어보고(예: `grep`/간단 집계) n이 두 자릿수는 되는지 확인하는 단계를 앞으로 체크리스트에 추가한다. 회복 통과군 자체가 이미 필터링된 부분집합이라 사건형 신호는 특히 더 희소해진다.
