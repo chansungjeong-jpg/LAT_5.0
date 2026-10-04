@@ -8,6 +8,7 @@ unreadable input is reported as an issue -- never silently treated as
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -16,6 +17,7 @@ from pathlib import Path
 import pandas as pd
 
 from lat5.candidate_board import CandidateRow, build_candidate_board, latest_decision_by_symbol
+from lat5.data import aggregate_60m, parse_watchlist
 
 DIAGNOSTICS_FILE = "backtest_diagnostics.json"
 FILTER_FILE = "monthly_weekly_filter.json"
@@ -187,4 +189,230 @@ def with_moving_averages(frame: pd.DataFrame, windows: tuple[int, ...] = (5, 20,
     out = frame.copy()
     for window in windows:
         out[f"sma{window}"] = out["close"].astype(float).rolling(window, min_periods=window).mean()
+    return out
+
+
+# ---------------------------------------------------------------------------
+# History from the dated daily reports (recovery filter / RS), day-over-day
+# change, sector summary, and per-symbol timelines. Reports are written live
+# by the daily pipeline, so each one only reflects data available that day.
+# ---------------------------------------------------------------------------
+
+_TICKER = re.compile(r"\d{6}")
+
+
+def _cells(line: str) -> list[str]:
+    return [part.strip() for part in line.strip().strip("|").split("|")]
+
+
+def parse_filter_report(text: str) -> list[dict]:
+    rows = []
+    for line in text.splitlines():
+        if not line.startswith("|"):
+            continue
+        cells = _cells(line)
+        if len(cells) < 7 or not _TICKER.fullmatch(cells[0]):
+            continue
+        ratio = cells[6].replace("배", "").strip()
+        try:
+            volume_ratio = float(ratio)
+        except ValueError:
+            volume_ratio = None
+        rows.append({"ticker": cells[0], "name": cells[1], "sector": cells[2],
+                     "provisional": cells[3] == "잠정", "volume_ratio": volume_ratio})
+    return rows
+
+
+def _percent(cell: str) -> float | None:
+    cleaned = cell.replace("%p", "").replace("%", "").replace("+", "").strip()
+    try:
+        return float(cleaned) / 100.0
+    except ValueError:
+        return None
+
+
+def parse_rs_report(text: str) -> list[dict]:
+    rows = []
+    for line in text.splitlines():
+        if not line.startswith("|"):
+            continue
+        cells = _cells(line)
+        if len(cells) < 6 or not cells[0].isdigit() or not _TICKER.fullmatch(cells[1]):
+            continue
+        rows.append({"rank": int(cells[0]), "ticker": cells[1], "name": cells[2],
+                     "stock_return": _percent(cells[3]), "rs": _percent(cells[5])})
+    return rows
+
+
+@dataclass
+class History:
+    filter_by_date: dict[str, list[dict]] = field(default_factory=dict)
+    rs_by_date: dict[str, list[dict]] = field(default_factory=dict)
+
+
+def _load_dated(folder: Path, parser) -> dict[str, list[dict]]:
+    if not folder.exists():
+        return {}
+    out: dict[str, list[dict]] = {}
+    for path in sorted(folder.glob("*.md")):
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", path.stem):
+            continue
+        try:
+            out[path.stem] = parser(path.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            continue
+    return out
+
+
+def load_history(root: Path) -> History:
+    reports = Path(root) / "reports"
+    return History(
+        filter_by_date=_load_dated(reports / "monthly_weekly_filter", parse_filter_report),
+        rs_by_date=_load_dated(reports / "relative_strength", parse_rs_report),
+    )
+
+
+def daily_change(history: History) -> dict | None:
+    dates = sorted(history.filter_by_date)
+    if len(dates) < 2:
+        return None
+    prev_date, date_ = dates[-2], dates[-1]
+    prev = {r["ticker"]: r for r in history.filter_by_date[prev_date]}
+    cur = {r["ticker"]: r for r in history.filter_by_date[date_]}
+    movers: list[dict] = []
+    rs_dates = sorted(history.rs_by_date)
+    rs_prev_date = rs_date = None
+    if len(rs_dates) >= 2:
+        rs_prev_date, rs_date = rs_dates[-2], rs_dates[-1]
+        before = {r["ticker"]: r for r in history.rs_by_date[rs_prev_date]}
+        for row in history.rs_by_date[rs_date]:
+            old = before.get(row["ticker"])
+            if old is None or old["rank"] == row["rank"]:
+                continue
+            movers.append({"ticker": row["ticker"], "name": row["name"], "prev_rank": old["rank"],
+                           "rank": row["rank"], "delta": old["rank"] - row["rank"], "rs": row["rs"]})
+        movers.sort(key=lambda m: (-m["delta"], m["rank"]))
+    return {
+        "date": date_, "prev_date": prev_date,
+        "new": [cur[t] for t in cur if t not in prev],
+        "exited": [prev[t] for t in prev if t not in cur],
+        "confirmed": [cur[t] for t in cur if t in prev and prev[t]["provisional"] and not cur[t]["provisional"]],
+        "rs_date": rs_date, "rs_prev_date": rs_prev_date, "rs_movers": movers,
+    }
+
+
+def universe_by_sector(watchlist_path: Path | str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    try:
+        items = parse_watchlist(watchlist_path)
+    except OSError:
+        return counts
+    for item in items:
+        counts[item.sector] = counts.get(item.sector, 0) + 1
+    return counts
+
+
+def sector_summary(board: list[CandidateRow], universe: dict[str, int]) -> list[dict]:
+    sectors = set(universe) | {r.sector or "미분류" for r in board}
+    rows = []
+    for sector in sectors:
+        members = [r for r in board if (r.sector or "미분류") == sector]
+        rs_values = [r.rs for r in members if r.rs is not None]
+        total = universe.get(sector)
+        rows.append({
+            "sector": sector, "passed": len(members), "universe": total,
+            "pass_rate": (len(members) / total) if total else None,
+            "avg_rs": (sum(rs_values) / len(rs_values)) if rs_values else None,
+        })
+    rows.sort(key=lambda r: (-r["passed"], r["sector"]))
+    return rows
+
+
+def count_series(history: History) -> pd.DataFrame:
+    dates = sorted(history.filter_by_date)
+    return pd.DataFrame({
+        "date": dates,
+        "passed": [len(history.filter_by_date[d]) for d in dates],
+        "provisional": [sum(1 for r in history.filter_by_date[d] if r.get("provisional")) for d in dates],
+    })
+
+
+def ticker_history(history: History, ticker: str) -> pd.DataFrame:
+    dates = sorted(set(history.filter_by_date) | set(history.rs_by_date))
+    rows = []
+    for day in dates:
+        rs_row = next((r for r in history.rs_by_date.get(day, []) if r["ticker"] == ticker), None)
+        passed_row = next((r for r in history.filter_by_date.get(day, []) if r["ticker"] == ticker), None)
+        rows.append({
+            "date": day,
+            "rank": rs_row["rank"] if rs_row else float("nan"),
+            "rs": rs_row["rs"] if rs_row else None,
+            "passed": passed_row is not None,
+            "provisional": bool(passed_row and passed_row.get("provisional")),
+            "in_filter_report": day in history.filter_by_date,
+        })
+    return pd.DataFrame(rows, columns=["date", "rank", "rs", "passed", "provisional", "in_filter_report"])
+
+
+def location_timeline(symbol: str, decisions: list[dict]) -> pd.DataFrame:
+    rows = [d for d in decisions if str(d.get("symbol")) == str(symbol)]
+    frame = pd.DataFrame(
+        [{"evaluated_at": pd.to_datetime(d.get("evaluated_at"), errors="coerce"),
+          "location_score": d.get("location_score"), "final_state": d.get("final_state")} for d in rows],
+        columns=["evaluated_at", "location_score", "final_state"])
+    return frame.sort_values("evaluated_at").reset_index(drop=True)
+
+
+# ---------------------------------------------------------------------------
+# Intraday bars (regular session 09:00-15:30 only, same window the 60-minute
+# location score uses) and EMAs.
+# ---------------------------------------------------------------------------
+
+_MINUTE_COLUMNS = ["datetime", "open", "high", "low", "close", "volume", "amount"]
+
+
+def _read_minutes(db_path: Path | str, ticker: str, interval: str, limit: int) -> pd.DataFrame:
+    path = Path(db_path)
+    if not path.exists():
+        return pd.DataFrame(columns=_MINUTE_COLUMNS)
+    try:
+        conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+        try:
+            frame = pd.read_sql_query(
+                "SELECT datetime, open, high, low, close, volume, amount FROM ohlcv_minute "
+                "WHERE ticker=? AND interval=? AND provider='kiwoom' AND datetime<>'' "
+                "ORDER BY datetime DESC LIMIT ?",
+                conn, params=(str(ticker), str(interval), int(limit)))
+        finally:
+            conn.close()
+    except (sqlite3.Error, pd.errors.DatabaseError):
+        return pd.DataFrame(columns=_MINUTE_COLUMNS)
+    return frame.sort_values("datetime").reset_index(drop=True)
+
+
+def load_minute_frame(db_path: Path | str, ticker: str, interval: str = "5", limit: int = 1000) -> pd.DataFrame:
+    frame = _read_minutes(db_path, ticker, interval, limit)
+    if frame.empty:
+        return frame
+    stamps = pd.to_datetime(frame["datetime"], errors="coerce")
+    minute_of_day = stamps.dt.hour * 60 + stamps.dt.minute
+    regular = (minute_of_day >= 9 * 60) & (minute_of_day <= 15 * 60 + 30)
+    return frame.loc[regular.fillna(False)].reset_index(drop=True)
+
+
+def load_hourly_frame(db_path: Path | str, ticker: str, limit_5m: int = 3600) -> pd.DataFrame:
+    frame = _read_minutes(db_path, ticker, "5", limit_5m)
+    if frame.empty:
+        return frame
+    frame["datetime"] = pd.to_datetime(frame["datetime"], errors="coerce")
+    hourly = aggregate_60m(frame.dropna(subset=["datetime"]).set_index("datetime"))
+    hourly = hourly.reset_index()
+    hourly["datetime"] = hourly["datetime"].dt.strftime("%Y-%m-%d %H:%M")
+    return hourly
+
+
+def with_emas(frame: pd.DataFrame, spans: tuple[int, ...]) -> pd.DataFrame:
+    out = frame.copy()
+    for span in spans:
+        out[f"ema{span}"] = out["close"].astype(float).ewm(span=span, adjust=False, min_periods=span).mean()
     return out

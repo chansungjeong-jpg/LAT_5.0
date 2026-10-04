@@ -16,11 +16,14 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT))
 
-from dashboard_app.charts import price_chart  # noqa: E402
+from dashboard_app import charts  # noqa: E402
 from lat5 import dashboard_data as dd  # noqa: E402
+from lat5 import ops_status  # noqa: E402
 from lat5.candidate_board import latest_decision_by_symbol  # noqa: E402
 
 DB_PATH = ROOT / "data" / "lat5_market.db"
+WATCHLIST = ROOT / "LAT_SIMPLE_v1.0_Watchlist.md"
+TASKS = ("LAT5_Monthly10_Weekly5_Recovery", "LAT5_Morning_Pipeline_Health_Check")
 
 st.set_page_config(page_title="LAT 5.0 | 관찰 · 매수", page_icon="📈", layout="wide",
                    initial_sidebar_state="collapsed")
@@ -146,18 +149,37 @@ def watch_workspace(board, decisions):
     decision = dd.decision_for(selected.ticker, decisions) or {}
     with center:
         st.subheader(f"{selected.name or ticker}  ·  {ticker}")
-        frame = dd.with_moving_averages(dd.load_daily_frame(DB_PATH, ticker, limit=200))
-        if frame.empty:
-            st.caption("확인 불가 · 일봉 데이터를 읽지 못했습니다.")
+        period = st.radio("차트 주기", ["일봉", "60분봉", "5분봉"], horizontal=True, key="watch_period")
+        levels = [
+            (decision.get("breakout_entry_price"), "저항돌파 진입가", "#22c55e"),
+            (decision.get("breakout_stop_price"), "손절(지지)", "#ef4444"),
+            (decision.get("breakout_target_price"), "목표(2차저항)", "#fbbf24"),
+        ]
+        name = selected.name or ticker
+        if period == "일봉":
+            frame = dd.with_moving_averages(dd.load_daily_frame(DB_PATH, ticker, limit=200))
+            if frame.empty:
+                st.caption("확인 불가 · 일봉 데이터를 읽지 못했습니다.")
+            else:
+                st.plotly_chart(charts.price_chart(frame, f"{name} 일봉 · 5/20/60일선", levels), width="stretch")
+                st.caption(f"마지막 일봉 {frame['date'].iloc[-1]} · 점선은 위치점수 판정이 계산한 가격(없으면 표시 안 함)")
+        elif period == "60분봉":
+            frame = dd.with_emas(dd.load_hourly_frame(DB_PATH, ticker), (60, 120))
+            if frame.empty:
+                st.caption("확인 불가 · 5분봉 데이터를 읽지 못해 60분봉을 만들 수 없습니다.")
+            else:
+                st.plotly_chart(charts.intraday_chart(frame, f"{name} 60분봉 · EMA60/120", (60, 120), bars=140,
+                                                      levels=levels), width="stretch")
+                st.caption(f"마지막 60분봉 {frame['datetime'].iloc[-1]} · 정규장(09:00~15:30) 5분봉을 합산 · "
+                           "EMA60/120은 위치점수의 60분 위치 항목이 쓰는 이평")
         else:
-            levels = [
-                (decision.get("breakout_entry_price"), "저항돌파 진입가", "#22c55e"),
-                (decision.get("breakout_stop_price"), "손절(지지)", "#ef4444"),
-                (decision.get("breakout_target_price"), "목표(2차저항)", "#fbbf24"),
-            ]
-            st.plotly_chart(price_chart(frame, f"{selected.name or ticker} 일봉 · 5/20/60일선", levels),
-                            width="stretch")
-            st.caption(f"마지막 일봉 {frame['date'].iloc[-1]} · 점선은 위치점수 판정이 계산한 가격(없으면 표시 안 함)")
+            frame = dd.with_emas(dd.load_minute_frame(DB_PATH, ticker, "5", limit=1400), (20,))
+            if frame.empty:
+                st.caption("확인 불가 · 5분봉 데이터를 읽지 못했습니다.")
+            else:
+                st.plotly_chart(charts.intraday_chart(frame, f"{name} 5분봉 · EMA20", (20,), bars=234,
+                                                      levels=levels), width="stretch")
+                st.caption(f"마지막 5분봉 {frame['datetime'].iloc[-1]} · 정규장(09:00~15:30)만 표시")
     with right:
         st.subheader("판정 근거")
         score = selected.location_score
@@ -178,6 +200,84 @@ def watch_workspace(board, decisions):
         if reaction:
             st.caption(f"일봉 이평 반응: {reaction.get('reaction')} · 5일 상태 {reaction.get('five_day_state')} "
                        f"· RSI {fmt_price(reaction.get('rsi14'))}")
+
+
+def _movers_table(rows):
+    return pd.DataFrame([{"종목": f"{m['name']} · {m['ticker']}", "RS 순위": f"{m['prev_rank']} → {m['rank']}",
+                          "변화": f"{m['delta']:+d}", "RS": fmt_pct(m["rs"])} for m in rows])
+
+
+def change_tab(history, board):
+    change = dd.daily_change(history)
+    if change is None:
+        st.caption("비교할 일자별 리포트가 2일 이상 필요합니다.")
+    else:
+        st.subheader(f"{change['date']} vs {change['prev_date']}")
+        total_now = len(history.filter_by_date[change["date"]])
+        total_prev = len(history.filter_by_date[change["prev_date"]])
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("회복 통과 종목", total_now, delta=total_now - total_prev)
+        c2.metric("신규 통과", len(change["new"]))
+        c3.metric("이탈", len(change["exited"]))
+        c4.metric("잠정 → 확정", len(change["confirmed"]),
+                  help="진행 중이던 월봉·주봉이 마감돼 잠정 표시가 사라진 종목")
+        for column, title, rows in zip(st.columns(3), ("신규 통과", "이탈", "확정 전환"),
+                                       (change["new"], change["exited"], change["confirmed"])):
+            with column:
+                st.markdown(f"**{title}**")
+                if rows:
+                    st.dataframe(pd.DataFrame([{"종목": f"{r['name']} · {r['ticker']}", "섹터": r["sector"]}
+                                               for r in rows]), width="stretch", hide_index=True)
+                else:
+                    st.caption("없음")
+        movers = change["rs_movers"]
+        st.markdown(f"**RS 순위 변화** ({change['rs_prev_date']} → {change['rs_date']})")
+        if movers:
+            up, down = st.columns(2)
+            with up:
+                st.caption("상승 Top 8")
+                st.dataframe(_movers_table([m for m in movers if m["delta"] > 0][:8]), width="stretch", hide_index=True)
+            with down:
+                st.caption("하락 Top 8")
+                st.dataframe(_movers_table([m for m in reversed(movers) if m["delta"] < 0][:8]),
+                             width="stretch", hide_index=True)
+        else:
+            st.caption("RS 리포트가 2일 이상 있어야 순위 변화를 비교할 수 있습니다.")
+    st.plotly_chart(charts.count_chart(dd.count_series(history)), width="stretch")
+    st.subheader("섹터 현황")
+    summary = dd.sector_summary(board, dd.universe_by_sector(WATCHLIST))
+    st.plotly_chart(charts.sector_chart(summary), width="stretch")
+    st.dataframe(pd.DataFrame([{
+        "섹터": r["sector"], "통과": r["passed"], "섹터 종목 수": "확인 불가" if r["universe"] is None else r["universe"],
+        "통과율": "확인 불가" if r["pass_rate"] is None else f"{r['pass_rate'] * 100:.0f}%",
+        "평균 RS": fmt_pct(r["avg_rs"]),
+    } for r in summary]), width="stretch", hide_index=True)
+    st.caption("섹터는 관찰목록 분류이고 한 종목이 여러 섹터에 속할 수 있습니다. 통과율은 매수 확률이 아닙니다.")
+
+
+def trend_tab(history, board, decisions):
+    if not history.rs_by_date and not history.filter_by_date:
+        st.caption("확인 불가 · 일자별 리포트(reports/)가 없습니다.")
+        return
+    latest_rs = history.rs_by_date[max(history.rs_by_date)] if history.rs_by_date else []
+    names = {r["ticker"]: r["name"] for r in latest_rs}
+    for row in board:
+        names.setdefault(row.ticker, row.name)
+    ordered = [r.ticker for r in board] + [t for t in names if t not in {r.ticker for r in board}]
+    ticker = st.selectbox("종목", ordered, format_func=lambda t: f"{names[t]} · {t}", key="trend_ticker")
+    frame = dd.ticker_history(history, ticker)
+    location = dd.location_timeline(ticker, decisions)
+    st.plotly_chart(charts.rank_chart(frame, location, f"{names[ticker]} · {ticker} 추이"), width="stretch")
+    shown = frame.tail(12).copy()
+    st.dataframe(pd.DataFrame({
+        "기준일": shown["date"],
+        "RS 순위": ["확인 불가" if pd.isna(v) else int(v) for v in shown["rank"]],
+        "RS": [fmt_pct(v) if v is not None and not pd.isna(v) else "확인 불가" for v in shown["rs"]],
+        "회복 필터": ["통과(잠정)" if p and prov else "통과" if p else ("미통과" if known else "리포트 없음")
+                    for p, prov, known in zip(shown["passed"], shown["provisional"], shown["in_filter_report"])],
+    }), width="stretch", hide_index=True)
+    st.caption("순위는 일자별 리포트가 있는 날만 표시합니다(없는 날은 비워 둠, 0 아님). "
+               "위치점수는 60분 눌림 셋업이 발생한 시점에만 존재해서 점으로 표시합니다.")
 
 
 def location_tab(decisions, board):
@@ -214,17 +314,52 @@ def rs_tab(rs_payload):
     } for i, r in enumerate(rows[:30], start=1)]), width="stretch", hide_index=True)
 
 
+@st.cache_data(ttl=30, show_spinner=False)
+def _task_info(name):
+    return ops_status.query_task(name)
+
+
 def system_tab(data_date, payloads):
     c1, c2, c3 = st.columns(3)
     c1.metric("DB 최신 일봉", data_date or "확인 불가")
     c2.metric("위치 판정 건수", len(payloads.location_decisions))
     c3.metric("관찰 목록", "확인 불가" if payloads.universe is None else payloads.universe)
+
+    st.subheader("스케줄 태스크")
+    for column, name in zip(st.columns(len(TASKS)), TASKS):
+        info = _task_info(name)
+        with column:
+            if info is None:
+                st.metric(name, "확인 불가", help="schtasks 조회 실패")
+                continue
+            st.metric(name, ops_status.describe_task(info, health_check=name == TASKS[1]))
+            st.caption(f"마지막 실행 {info['last_run']} · 다음 {info['next_run']}")
+
+    runs = ops_status.load_pipeline_runs(ROOT / "reports" / "daily_pipeline", limit=14)
+    st.subheader("최근 파이프라인 실행")
+    if runs:
+        marks = {"COMPLETE": "🟢 완료", "BLOCKED": "🔴 차단", "INCOMPLETE": "🟡 중단/미완"}
+        st.dataframe(pd.DataFrame([{
+            "날짜": r["date"], "결과": marks.get(r["result"], r["result"]),
+            "수집 run": "—" if r["run_id"] is None else str(r["run_id"]),
+            "성공/종목": "—" if r["symbols"] is None else f"{r['success']}/{r['symbols']}",
+            "건강성": r["health"] or "—", "사유": r["detail"] or "",
+            "시작": (r["started_at"] or "")[:19].replace("T", " "),
+        } for r in runs]), width="stretch", hide_index=True)
+    else:
+        st.caption("확인 불가 · reports/daily_pipeline 로그가 없습니다.")
+    collection = ops_status.load_collection_runs(DB_PATH, limit=14)
+    if not collection.empty:
+        st.plotly_chart(charts.runs_chart(collection), width="stretch")
+        st.caption("수집은 정상일 때 약 35분 걸립니다. 진행/중단 run은 소요시간이 없어 막대가 없습니다.")
+
     health = read_text(ROOT / "reports" / "data_health_latest.md")
-    st.subheader("데이터 건강성")
-    st.markdown(health or "확인 불가 · reports/data_health_latest.md 없음")
-    reports = sorted((ROOT / "reports" / "pipeline_health").glob("*.md")) if (ROOT / "reports" / "pipeline_health").exists() else []
-    st.subheader("파이프라인 아침 점검")
-    st.markdown(read_text(reports[-1]) if reports else "점검 리포트 없음")
+    with st.expander("데이터 건강성 리포트"):
+        st.markdown(health or "확인 불가 · reports/data_health_latest.md 없음")
+    check_dir = ROOT / "reports" / "pipeline_health"
+    checks = sorted(check_dir.glob("*.md")) if check_dir.exists() else []
+    with st.expander("파이프라인 아침 점검 (08:00)"):
+        st.markdown(read_text(checks[-1]) if checks else "점검 리포트 없음")
     if payloads.issues:
         st.warning("산출물 읽기 실패: " + ", ".join(str(i.get("source")) for i in payloads.issues))
 
@@ -245,7 +380,13 @@ def body():
     st.markdown('<div class="lat-header"><div class="lat-brand">LAT 5.0</div>'
                 '<span class="lat-badge">관찰용 · 주문/알림 없음</span></div>', unsafe_allow_html=True)
     render_band(band, funnel, as_of, now)
-    watch_tab, location_tab_, rs_tab_, system_tab_ = st.tabs(["관찰 후보", "위치점수 상세", "RS 순위", "시스템 상태"])
+    history = dd.load_history(ROOT)
+    change_tab_, watch_tab, trend_tab_, location_tab_, rs_tab_, system_tab_ = st.tabs(
+        ["오늘의 변화", "관찰 후보", "추이", "위치점수 상세", "RS 순위", "시스템 상태"])
+    with change_tab_:
+        change_tab(history, board)
+    with trend_tab_:
+        trend_tab(history, board, payloads.location_decisions)
     with watch_tab:
         watch_workspace(board, payloads.location_decisions)
     with location_tab_:
