@@ -1,0 +1,26 @@
+=== run started_at=2026-10-03T16:00:01 ===
+$ C:\Users\User\AppData\Local\Programs\Python\Python313\python.exe -m lat5.cli collect --db C:\trading_system\LAT_5.0\data\lat5_market.db --watchlist C:\trading_system\LAT_5.0\LAT_SIMPLE_v1.0_Watchlist.md --env C:\trading_system\LAT_5.0\.env --token-cache C:\trading_system\LAT_5.0\data\kiwoom_token_cache.json --base-date 20261003
+{"status": "BLOCKED", "run_id": 54, "error": "database is locked"}
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\trading_system\LAT_5.0\src\lat5\cli.py", line 536, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "C:\trading_system\LAT_5.0\src\lat5\cli.py", line 529, in main
+    return _run_collect(args)
+  File "C:\trading_system\LAT_5.0\src\lat5\cli.py", line 476, in _run_collect
+    result = collect_watchlist(client, store, run_id, symbols, base_date)
+  File "C:\trading_system\LAT_5.0\src\lat5\collector.py", line 237, in collect_watchlist
+    result = collect_symbol(client, store, run_id, ticker, base_date)
+  File "C:\trading_system\LAT_5.0\src\lat5\collector.py", line 213, in collect_symbol
+    save(page.payload)
+    ~~~~^^^^^^^^^^^^^^
+  File "C:\trading_system\LAT_5.0\src\lat5\collector.py", line 174, in <lambda>
+    lambda payload: store.save_minutes(run_id, parse_minutes(ticker, payload)),
+                    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\trading_system\LAT_5.0\src\lat5\collector_store.py", line 294, in save_minutes
+    self.conn.commit()
+    ~~~~~~~~~~~~~~~~^^
+sqlite3.OperationalError: database is locked
+=== run result=BLOCKED command_exit=1 ===
