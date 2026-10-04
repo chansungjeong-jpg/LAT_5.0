@@ -18,9 +18,10 @@ from lat5.monthly_weekly_filter import (  # noqa: E402
     recent_recovery,
     recovery_details,
 )
+from lat5.scan_support import should_update_latest, truncate_daily_as_of  # noqa: E402
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--db", default=str(PROJECT_ROOT / "data" / "lat5_market.db"))
     parser.add_argument(
@@ -30,14 +31,22 @@ def main() -> int:
     parser.add_argument(
         "--output-dir", default=str(PROJECT_ROOT / "reports" / "monthly_weekly_filter")
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--json-output",
+        default=str(PROJECT_ROOT / "artifacts" / "latest_scoring" / "monthly_weekly_filter.json"),
+    )
+    args = parser.parse_args(argv)
     as_of = pd.Timestamp(args.as_of)
     items = {item.ticker: item for item in parse_watchlist(args.watchlist)}
     matches: list[tuple[object, dict[str, object], dict[str, object], bool, float | None]] = []
 
     with KiwoomDataStore(args.db) as store:
         for item in items.values():
-            daily = store.load_daily(item.ticker)
+            # Truncate at as_of: weekly/monthly bars and the volume ratio must
+            # not see later sessions when this is a past-dated scan.
+            daily = truncate_daily_as_of(store.load_daily(item.ticker), as_of)
+            if daily.empty:
+                continue
             weekly, monthly = periods_as_of(daily, as_of, include_in_progress=True)
             if recent_recovery(weekly, 5) and recent_recovery(monthly, 10):
                 provisional = bool(
@@ -81,31 +90,31 @@ def main() -> int:
         lines.append("| - | 해당 없음 | - | - | - | - | - |")
     output.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    json_output = PROJECT_ROOT / "artifacts" / "latest_scoring" / "monthly_weekly_filter.json"
-    json_output.parent.mkdir(parents=True, exist_ok=True)
-    json_output.write_text(
-        json.dumps(
+    json_output = Path(args.json_output)
+    payload = {
+        "as_of": as_of.date().isoformat(),
+        "universe_size": len(items),
+        "rows": [
             {
-                "as_of": as_of.date().isoformat(),
-                "universe_size": len(items),
-                "rows": [
-                    {
-                        "ticker": item.ticker,
-                        "name": item.name,
-                        "sector": item.sector,
-                        "provisional": provisional,
-                        "weekly_recovery": f"{weekly['previous_period']} → {weekly['current_period']}",
-                        "monthly_recovery": f"{monthly['previous_period']} → {monthly['current_period']}",
-                        "volume_ratio": volume_ratio,
-                    }
-                    for item, weekly, monthly, provisional, volume_ratio in matches
-                ],
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+                "ticker": item.ticker,
+                "name": item.name,
+                "sector": item.sector,
+                "provisional": provisional,
+                "weekly_recovery": f"{weekly['previous_period']} → {weekly['current_period']}",
+                "monthly_recovery": f"{monthly['previous_period']} → {monthly['current_period']}",
+                "volume_ratio": volume_ratio,
+            }
+            for item, weekly, monthly, provisional, volume_ratio in matches
+        ],
+    }
+    if should_update_latest(json_output, as_of.date().isoformat()):
+        json_output.parent.mkdir(parents=True, exist_ok=True)
+        json_output.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    else:
+        # Backfill of a past date: dated report written, newer "latest" kept.
+        print(f"latest json kept (existing as_of is newer than {as_of.date()})")
     print(f"output={output}")
     print(f"as_of={as_of.date()} universe={len(items)} matches={len(matches)}")
     for item, _, _, _, _ in matches:

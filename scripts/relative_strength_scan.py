@@ -4,26 +4,33 @@ import argparse
 import json
 from pathlib import Path
 
+import pandas as pd
+
 from lat5.data import KiwoomDataStore, parse_watchlist
 from lat5.relative_strength import market_average_return, relative_strength
+from lat5.scan_support import should_update_latest, truncate_daily_as_of
 
 DAYS = 20
 JSON_OUTPUT = Path("artifacts") / "latest_scoring" / "relative_strength.json"
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--db", required=True)
     parser.add_argument("--watchlist", required=True)
     parser.add_argument("--as-of", required=True)
     parser.add_argument("--days", type=int, default=DAYS)
-    args = parser.parse_args()
+    parser.add_argument("--output-dir", default=str(Path("reports") / "relative_strength"))
+    parser.add_argument("--json-output", default=str(JSON_OUTPUT))
+    args = parser.parse_args(argv)
+    as_of = pd.Timestamp(args.as_of)
 
     items = parse_watchlist(args.watchlist)
     frames = {}
     with KiwoomDataStore(args.db) as store:
         for item in items:
-            daily = store.load_daily(item.ticker)
+            # Truncate at as_of: a past-dated scan must not see later bars.
+            daily = truncate_daily_as_of(store.load_daily(item.ticker), as_of)
             if not daily.empty:
                 frames[item.ticker] = daily.sort_index()
 
@@ -42,7 +49,7 @@ def main() -> int:
     market_return_text = (
         f"{market_return * 100:.2f}%" if market_return is not None else "계산불가"
     )
-    out_dir = Path("reports") / "relative_strength"
+    out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{args.as_of}.md"
     lines = [
@@ -63,8 +70,15 @@ def main() -> int:
         )
     out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    JSON_OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    JSON_OUTPUT.write_text(
+    json_output = Path(args.json_output)
+    if not should_update_latest(json_output, args.as_of):
+        # Backfill of a past date: keep the dated report, leave the newer
+        # "latest" snapshot (which the dashboard reads) untouched.
+        print(f"output={out_path}")
+        print(f"latest json kept (existing as_of is newer than {args.as_of})")
+        return 0
+    json_output.parent.mkdir(parents=True, exist_ok=True)
+    json_output.write_text(
         json.dumps(
             {
                 "as_of": args.as_of,
