@@ -38,10 +38,19 @@ def build_data_health(db_path: str | Path, items: Iterable[WatchItem]) -> dict[s
         latest_run = (
             conn.execute(
                 "SELECT run_id, status, watchlist_count, success_count, error_count "
-                "FROM collection_runs ORDER BY run_id DESC LIMIT 1"
+                "FROM collection_runs WHERE status <> 'RUNNING' ORDER BY run_id DESC LIMIT 1"
             ).fetchone()
             if _table_exists(conn, "collection_runs")
             else None
+        )
+        # A RUNNING row is either a collection still in flight or an orphan left by a
+        # killed process (e.g. the PC went to sleep mid-run). Neither says whether the
+        # last *finished* collection was healthy, so it must not shadow that run -- but
+        # it is surfaced so an orphan is never silently ignored.
+        in_progress_runs = (
+            int(conn.execute("SELECT COUNT(*) FROM collection_runs WHERE status = 'RUNNING'").fetchone()[0])
+            if _table_exists(conn, "collection_runs")
+            else 0
         )
         latest_error = None
         if latest_run and _table_exists(conn, "collection_errors"):
@@ -104,6 +113,7 @@ def build_data_health(db_path: str | Path, items: Iterable[WatchItem]) -> dict[s
         "latest_collection_scope_ok": latest_scope_ok,
         "latest_collection_error": latest_error,
         "latest_collection_complete": latest_complete,
+        "in_progress_runs": in_progress_runs,
         "data_integrity_ok": bool(sqlite_ok and invalid_ohlcv == 0),
         "invalid_ohlcv_rows": invalid_ohlcv,
     }
@@ -147,7 +157,13 @@ def write_data_health(health: dict[str, object], output_dir: str | Path) -> tupl
         f"| Foreign flow | {health['foreign_flow_symbols']} | {health['foreign_flow_coverage_pct']}% | {health['foreign_flow_latest'] or '-'} | 90% |\n"
         f"| Execution strength | {health['strength_symbols']} | schema={health['strength_schema_ok']} | {health['strength_latest'] or '-'} | required |\n"
         f"\nCollection complete: `{health['latest_collection_complete']}`  \n"
-        f"OHLCV integrity: `{health['data_integrity_ok']}` (invalid rows: {health['invalid_ohlcv_rows']})\n",
+        f"OHLCV integrity: `{health['data_integrity_ok']}` (invalid rows: {health['invalid_ohlcv_rows']})\n"
+        + (
+            f"\nIn-progress/unfinished runs: {health['in_progress_runs']} "
+            "(not counted as the latest collection; an old one is an orphan from an interrupted run)\n"
+            if health.get("in_progress_runs")
+            else ""
+        ),
         encoding="utf-8",
     )
     return json_path, md_path
