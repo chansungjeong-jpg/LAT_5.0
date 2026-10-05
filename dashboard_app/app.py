@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT))
 from dashboard_app import charts  # noqa: E402
 from lat5 import dashboard_data as dd  # noqa: E402
 from lat5 import ops_status  # noqa: E402
+from lat5 import research_facts  # noqa: E402
 from lat5.candidate_board import latest_decision_by_symbol  # noqa: E402
 
 DB_PATH = ROOT / "data" / "lat5_market.db"
@@ -280,6 +281,61 @@ def trend_tab(history, board, decisions):
                "위치점수는 60분 눌림 셋업이 발생한 시점에만 존재해서 점으로 표시합니다.")
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _hypothesis_facts(_signature):
+    sessions = research_facts.load_sessions(DB_PATH)
+    return research_facts.hypothesis_facts(ROOT, sessions)
+
+
+STATE_TEXT = {"PENDING_HOLDOUT": "holdout 대기", "FAILED_TRAIN": "기각(train)", "FAILED_HOLDOUT": "기각(holdout)",
+              "FAILED": "기각", "ADOPTED": "채택", "REGISTERED": "등록(미실험)", "RESOLVED": "종결"}
+
+
+def research_tab():
+    log = ROOT / research_facts.HYPOTHESES_PATH
+    signature = log.stat().st_mtime if log.exists() else 0
+    hypotheses = _hypothesis_facts(signature)
+    states = [state for h in hypotheses for _, state in h["status_items"]]
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("등록한 가설", len(hypotheses), help="다중검정 예산: 시도가 늘수록 채택 기준에 보정이 필요합니다.")
+    c2.metric("기각", sum(1 for s_ in states if s_.startswith("FAILED")))
+    c3.metric("holdout 대기", sum(1 for s_ in states if s_ == "PENDING_HOLDOUT"))
+    c4.metric("채택", sum(1 for s_ in states if s_ == "ADOPTED"),
+              help="채택은 규칙4 충족 + 사용자 승인 후에만 기록됩니다.")
+    ready = [h["id"] for h in hypotheses if h["pending"] and h["maturity"] and h["maturity"]["matured"]
+             and not h["holdout_run_exists"]]
+    if ready:
+        st.warning(f"성숙했지만 아직 판정하지 않은 holdout: {', '.join(ready)} — Claude Code에서 '연구 보고'를 "
+                   "요청하면 연구 에이전트가 규칙대로 1회 판정하고 보고서를 씁니다.")
+    rows = []
+    for h in hypotheses:
+        maturity = h["maturity"]
+        if maturity is None:
+            holdout = "—"
+        elif maturity["matured"]:
+            holdout = "성숙" + (" · 판정 완료" if h["holdout_run_exists"] else " · 미판정")
+        else:
+            holdout = f"{maturity['sessions_missing']}거래일 남음 (≈{maturity['estimated_date']})"
+        items = " / ".join(f"{label + ': ' if label else ''}{STATE_TEXT.get(state, state)}"
+                           for label, state in h["status_items"]) or "확인 불가"
+        rows.append({"가설": h["id"], "제목": h["title"], "상태": items,
+                     "train": " ~ ".join(h["train"]) if h["train"] else "—",
+                     "holdout": " ~ ".join(h["holdout"]) if h["holdout"] else "—", "holdout 성숙": holdout})
+    if rows:
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+    else:
+        st.caption("확인 불가 · 가설 로그를 읽지 못했습니다.")
+    folder = ROOT / "reports" / "research"
+    reports = sorted((p for p in folder.glob("*.md") if not p.stem.endswith("_facts")), reverse=True) \
+        if folder.exists() else []
+    st.subheader("연구 보고서")
+    if not reports:
+        st.caption("아직 보고서가 없습니다. Claude Code에서 '연구 보고'를 요청하면 lat-research-agent가 작성합니다.")
+        return
+    chosen = st.selectbox("보고서", [p.stem for p in reports], key="research_report")
+    st.markdown(read_text(folder / f"{chosen}.md") or "확인 불가")
+
+
 def location_tab(decisions, board):
     latest = sorted(latest_decision_by_symbol(decisions).values(),
                     key=lambda d: d.get("location_score") or -1, reverse=True)[:20]
@@ -381,8 +437,10 @@ def body():
                 '<span class="lat-badge">관찰용 · 주문/알림 없음</span></div>', unsafe_allow_html=True)
     render_band(band, funnel, as_of, now)
     history = dd.load_history(ROOT)
-    change_tab_, watch_tab, trend_tab_, location_tab_, rs_tab_, system_tab_ = st.tabs(
-        ["오늘의 변화", "관찰 후보", "추이", "위치점수 상세", "RS 순위", "시스템 상태"])
+    change_tab_, watch_tab, trend_tab_, research_tab_, location_tab_, rs_tab_, system_tab_ = st.tabs(
+        ["오늘의 변화", "관찰 후보", "추이", "연구 보고", "위치점수 상세", "RS 순위", "시스템 상태"])
+    with research_tab_:
+        research_tab()
     with change_tab_:
         change_tab(history, board)
     with trend_tab_:
