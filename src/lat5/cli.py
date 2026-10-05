@@ -470,6 +470,9 @@ def _run_collect(args: argparse.Namespace) -> int:
         symbols = ["005930"] if args.probe else core_symbols
     base_date = args.base_date or datetime.now().strftime("%Y%m%d")
     with CollectorStore(args.db) as store:
+        # Clean up runs an earlier interruption (PC sleep, shutdown) left RUNNING, before
+        # this run starts, so they cannot shadow it in data-health.
+        closed_orphans = store.close_orphaned_runs()
         run_id = store.start_run(len(symbols), token.cached_at)
         client = KiwoomClient(token)
         try:
@@ -502,6 +505,7 @@ def _run_collect(args: argparse.Namespace) -> int:
                 "symbols": len(symbols),
                 "success_symbols": success_count,
                 "api_errors": error_count,
+                **({"closed_orphan_runs": closed_orphans} if closed_orphans else {}),
             },
             ensure_ascii=False,
         )

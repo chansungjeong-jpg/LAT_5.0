@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable
 
@@ -18,19 +19,67 @@ def _now_iso() -> str:
 
 
 class CollectorStore:
+    # sqlite's default 5s lock wait is far too short for a 35-minute collection on a PC
+    # that can sleep mid-run: 2026-10-03's run died with "database is locked" the moment
+    # it resumed. Wait up to a minute per attempt, then retry the commit a few times.
+    BUSY_TIMEOUT_SECONDS = 60
+    COMMIT_ATTEMPTS = 5
+
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(self.path)
+        self.conn = sqlite3.connect(self.path, timeout=self.BUSY_TIMEOUT_SECONDS)
+        self.conn.execute(f"PRAGMA busy_timeout={self.BUSY_TIMEOUT_SECONDS * 1000}")
         self.conn.execute("PRAGMA foreign_keys=ON")
+        self._sleep = time.sleep
         self._create_schema()
+
+    def _commit(self) -> None:
+        """Commit, retrying only transient "database is locked" errors."""
+        for attempt in range(1, self.COMMIT_ATTEMPTS + 1):
+            try:
+                self.conn.commit()
+                return
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc).lower() or attempt == self.COMMIT_ATTEMPTS:
+                    raise
+                self._sleep(5.0 * attempt)
+
+    def close_orphaned_runs(self, older_than_hours: float = 3.0) -> list[int]:
+        """Close RUNNING runs that started long ago and never finished.
+
+        A normal collection takes ~35 minutes, so a run still RUNNING after hours was
+        interrupted (PC sleep/shutdown, killed process) and can no longer close itself.
+        Left open it would shadow real runs. Recent RUNNING rows are left alone -- they
+        may be a collection genuinely in flight. If a sleeping process later wakes up and
+        finishes, its own finish_run overwrites this status.
+        """
+        cutoff = (datetime.now().astimezone() - timedelta(hours=older_than_hours)).isoformat()
+        rows = self.conn.execute(
+            "SELECT run_id FROM collection_runs WHERE status='RUNNING' AND finished_at IS NULL "
+            "AND started_at < ? ORDER BY run_id", (cutoff,)).fetchall()
+        closed = [int(row[0]) for row in rows]
+        for run_id in closed:
+            self.conn.execute(
+                "UPDATE collection_runs SET status='BLOCKED', finished_at=? WHERE run_id=?",
+                (_now_iso(), run_id))
+            self.conn.execute(
+                """INSERT INTO collection_errors
+                   (run_id, ticker, api_id, error_code, message, occurred_at)
+                   VALUES (?, '*', 'RUN', 'ORPHANED_RUN', ?, ?)""",
+                (run_id, f"RUNNING for over {older_than_hours:g}h with no finish -- process was "
+                         "interrupted (sleep/shutdown/kill); closed at the next collect start",
+                 _now_iso()))
+        if closed:
+            self._commit()
+        return closed
 
     def __enter__(self) -> "CollectorStore":
         return self
 
     def __exit__(self, exc_type, exc, traceback) -> None:
         if exc_type is None:
-            self.conn.commit()
+            self._commit()
         else:
             self.conn.rollback()
         self.conn.close()
@@ -176,7 +225,7 @@ class CollectorStore:
             );
             """
         )
-        self.conn.commit()
+        self._commit()
 
     def start_run(self, watchlist_count: int, token_cache_time: datetime) -> int:
         cursor = self.conn.execute(
@@ -185,7 +234,7 @@ class CollectorStore:
                VALUES (?, 'RUNNING', ?, ?)""",
             (_now_iso(), watchlist_count, token_cache_time.isoformat()),
         )
-        self.conn.commit()
+        self._commit()
         return int(cursor.lastrowid)
 
     def finish_run(self, run_id: int, status: str, success_count: int, error_count: int) -> None:
@@ -195,7 +244,7 @@ class CollectorStore:
                WHERE run_id=?""",
             (_now_iso(), status, success_count, error_count, run_id),
         )
-        self.conn.commit()
+        self._commit()
 
     def run_status(self, run_id: int) -> str:
         row = self.conn.execute(
@@ -214,7 +263,7 @@ class CollectorStore:
                VALUES (?, ?, ?, ?, ?, ?)""",
             (run_id, ticker, api_id, error_code, message, _now_iso()),
         )
-        self.conn.commit()
+        self._commit()
 
     def save_raw_page(self, run_id: int, ticker: str, page: ApiPage) -> None:
         self.conn.execute(
@@ -230,7 +279,7 @@ class CollectorStore:
                 json.dumps(page.payload, ensure_ascii=True, sort_keys=True),
             ),
         )
-        self.conn.commit()
+        self._commit()
 
     def save_daily(
         self, run_id: int, rows: Iterable[dict], provider: str = "kiwoom"
@@ -264,7 +313,7 @@ class CollectorStore:
                  collected_at=excluded.collected_at, run_id=excluded.run_id""",
             values,
         )
-        self.conn.commit()
+        self._commit()
         return len(values)
 
     def save_minutes(
@@ -291,7 +340,7 @@ class CollectorStore:
                  collected_at=excluded.collected_at, run_id=excluded.run_id""",
             values,
         )
-        self.conn.commit()
+        self._commit()
         return len(values)
 
     def save_strength(
@@ -313,7 +362,7 @@ class CollectorStore:
                  run_id=excluded.run_id""",
             values,
         )
-        self.conn.commit()
+        self._commit()
         return len(values)
 
     def save_foreign_flow(
@@ -338,7 +387,7 @@ class CollectorStore:
                  collected_at=excluded.collected_at, run_id=excluded.run_id""",
             values,
         )
-        self.conn.commit()
+        self._commit()
         return len(values)
 
     def save_leader_observations(
@@ -373,7 +422,7 @@ class CollectorStore:
                  collected_at=excluded.collected_at, run_id=excluded.run_id""",
             values,
         )
-        self.conn.commit()
+        self._commit()
         return len(values)
 
     def save_us_observations(
@@ -398,7 +447,7 @@ class CollectorStore:
                  collected_on=excluded.collected_on, run_id=excluded.run_id""",
             values,
         )
-        self.conn.commit()
+        self._commit()
         return len(values)
 
     def save_us_market_gate(
@@ -417,7 +466,7 @@ class CollectorStore:
              decision.us10y_symbol, decision.positive_indices,
              json.dumps(decision.reasons), run_id),
         )
-        self.conn.commit()
+        self._commit()
 
     def save_us_company_flows(
         self, run_id: int, as_of, flows: Iterable[CompanyFlowDecision], provider: str = "yfinance"
@@ -438,7 +487,7 @@ class CollectorStore:
                  symbols_json=excluded.symbols_json, run_id=excluded.run_id""",
             values,
         )
-        self.conn.commit()
+        self._commit()
         return len(values)
 
     def save_us_featured_stocks(
@@ -475,5 +524,5 @@ class CollectorStore:
                  kr_tickers_json=excluded.kr_tickers_json, run_id=excluded.run_id""",
             values,
         )
-        self.conn.commit()
+        self._commit()
         return len(values)
