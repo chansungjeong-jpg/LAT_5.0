@@ -287,7 +287,7 @@ def _hypothesis_facts(_signature):
     return research_facts.hypothesis_facts(ROOT, sessions)
 
 
-STATE_TEXT = {"PENDING_HOLDOUT": "holdout 대기", "FAILED_TRAIN": "기각(train)", "FAILED_HOLDOUT": "기각(holdout)",
+STATE_TEXT = {"PENDING_HOLDOUT": "holdout 대기", "PENDING_APPROVAL": "승인 대기(규칙4 통과)", "FAILED_TRAIN": "기각(train)", "FAILED_HOLDOUT": "기각(holdout)",
               "FAILED": "기각", "ADOPTED": "채택", "REGISTERED": "등록(미실험)", "RESOLVED": "종결"}
 
 
@@ -299,7 +299,8 @@ def research_tab():
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("등록한 가설", len(hypotheses), help="다중검정 예산: 시도가 늘수록 채택 기준에 보정이 필요합니다.")
     c2.metric("기각", sum(1 for s_ in states if s_.startswith("FAILED")))
-    c3.metric("holdout 대기", sum(1 for s_ in states if s_ == "PENDING_HOLDOUT"))
+    c3.metric("대기", sum(1 for s_ in states if s_ in ("PENDING_HOLDOUT", "PENDING_APPROVAL")),
+              help="holdout 대기 또는 규칙4 통과 후 사용자 승인 대기")
     c4.metric("채택", sum(1 for s_ in states if s_ == "ADOPTED"),
               help="채택은 규칙4 충족 + 사용자 승인 후에만 기록됩니다.")
     ready = [h["id"] for h in hypotheses if h["pending"] and h["maturity"] and h["maturity"]["matured"]

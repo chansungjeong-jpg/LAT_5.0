@@ -29,7 +29,7 @@ HYPOTHESIS_GROUPS = {
     "H-003": {"top": "rsi_recovery", "bottom": "rsi_no_recovery", "expected_sign": 1, "hold": 10},
 }
 
-_STATE_ORDER = ("PENDING_HOLDOUT", "FAILED_TRAIN", "FAILED_HOLDOUT", "ADOPTED", "FAILED", "REGISTERED", "RESOLVED")
+_STATE_ORDER = ("PENDING_APPROVAL", "PENDING_HOLDOUT", "FAILED_TRAIN", "FAILED_HOLDOUT", "ADOPTED", "FAILED", "REGISTERED", "RESOLVED")
 _DATE = r"(\d{4}-\d{2}-\d{2})"
 _RANGE = re.compile(_DATE + r"\s*~\s*" + _DATE)
 
@@ -85,7 +85,7 @@ def research_budget(hypotheses: list[dict]) -> dict:
     return {
         "registered": len(hypotheses),
         "failed": sum(1 for s in states if s.startswith("FAILED")),
-        "pending": sum(1 for s in states if s in ("PENDING_HOLDOUT", "REGISTERED")),
+        "pending": sum(1 for s in states if s in ("PENDING_HOLDOUT", "PENDING_APPROVAL", "REGISTERED")),
         "adopted": sum(1 for s in states if s == "ADOPTED"),
         "attempts_note": "다중검정: 시도 수가 늘수록(대략 10건 단위) 채택기준에 보정을 얹는 것을 검토한다.",
     }

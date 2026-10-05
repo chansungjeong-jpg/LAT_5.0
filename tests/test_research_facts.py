@@ -268,3 +268,15 @@ def test_run_holdout_runs_registered_window_through_latest_session(monkeypatch, 
     assert command[command.index("--start") + 1] == "2026-09-03"
     assert command[command.index("--end") + 1] == "2026-10-02"
     assert command[command.index("--run-id") + 1] == "h002_holdout_20261005"
+
+
+def test_pending_approval_state_is_parsed_and_counted_as_pending():
+    text = HYPOTHESES_MD.replace("**체결강도 당일평균: PENDING_HOLDOUT** (train 통과)",
+                                 "**체결강도 당일평균: PENDING_APPROVAL** (규칙4 통과, 승인 대기)")
+
+    items = rf.parse_hypotheses(text)
+
+    assert ("체결강도 당일평균", "PENDING_APPROVAL") in items[1]["status_items"]
+    assert rf.research_budget(items)["pending"] == 1
+    # an approval-pending hypothesis is not a holdout candidate any more
+    assert not any(state == "PENDING_HOLDOUT" for _, state in items[1]["status_items"])

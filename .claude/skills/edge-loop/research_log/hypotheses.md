@@ -28,7 +28,7 @@
 - train 실행(2026-09-09, `artifacts/edge_validation/h002_train_20260909/`): 두 신호가 서로 다른 결과 — 아래 상태 참고.
 - 상태:
   - **외국인 순매수 5일누적: RESOLVED — FAILED_TRAIN** (`failures.md` H-002a 참고, holdout 안 감)
-  - **체결강도 당일평균: PENDING_HOLDOUT** (train 통과, holdout 2026-09-03~09 H=10 성숙 대기)
+  - **체결강도 당일평균: PENDING_APPROVAL** (train 통과 → holdout 1회 판정 완료 2026-10-05, `artifacts/edge_validation/h002_holdout_20261005/`: 규칙4 3조건 충족 = ADOPT_CANDIDATE, **사용자 승인 대기**. 채택 권고 아님 — 한계는 `reports/research/2026-10-05.md` 참고)
 
 ---
 
